@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>음성 번역기</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c1f24; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --accent-ink: #ffffff; --ok: #16a34a; --bad: #dc2626; --warn: #d97706;
+    --rec: #dc2626; --src-bg: #f3f4f6; --dst-bg: #eef4ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e6e8eb; --muted: #9aa3ad; --line: #2a3038;
+      --accent: #3b82f6; --src-bg: #1f242b; --dst-bg: #1a2436;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  main { max-width: 860px; margin: 0 auto; padding: 18px 16px 140px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  select, button, input[type=text] { font: inherit; color: inherit; }
+  select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+  .swap { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+  .swap:hover { border-color: var(--accent); }
+  label.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; margin-left: auto; }
+  #log { display: flex; flex-direction: column; gap: 10px; }
+  .row { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row .src { padding: 10px 14px; background: var(--src-bg); font-size: 14px; color: var(--muted); display: flex; gap: 8px; }
+  .row .src .lang { font-weight: 600; color: var(--ink); flex: none; }
+  .row .dst { padding: 12px 14px; background: var(--dst-bg); font-size: 18px; line-height: 1.5; display: flex; gap: 10px; align-items: flex-start; }
+  .row .dst .text { flex: 1; white-space: pre-wrap; word-break: break-word; }
+  .row .dst .text.pending::after { content: "…"; animation: blink 1s steps(2) infinite; color: var(--muted); }
+  .row .dst .text.error { color: var(--bad); font-size: 14px; }
+  .row .meta { flex: none; display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+  .row button.say { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; cursor: pointer; }
+  .row button.say:disabled { opacity: .4; cursor: default; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
+  .bar { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+  #mic { flex: none; width: 64px; height: 64px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-ink);
+         font-size: 26px; cursor: pointer; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  #mic.on { background: var(--rec); animation: pulse 1.4s ease-in-out infinite; }
+  #mic:disabled { background: var(--muted); cursor: not-allowed; animation: none; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,.45);} 50% { box-shadow: 0 0 0 14px rgba(220,38,38,0);} }
+  .typing { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  #interim { min-height: 20px; color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #interim.live { color: var(--ink); }
+  form { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); min-width: 0; }
+  form button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+  .notice { font-size: 13px; color: var(--warn); margin-bottom: 10px; }
+  .notice:empty { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>음성 번역기</h1>
+  <span id="status" class="pill">연결 중…</span>
+</header>
+<main>
+  <div class="controls">
+    <select id="source" aria-label="말하는 언어"></select>
+    <button class="swap" id="swap" title="방향 바꾸기">⇄</button>
+    <select id="target" aria-label="번역할 언어"></select>
+    <label class="chk"><input type="checkbox" id="autosay"> 번역 자동 읽어주기</label>
+  </div>
+  <div id="notice" class="notice"></div>
+  <div id="log"><div class="empty">아래 마이크 버튼을 누르고 말하세요. 문장이 끝나면 바로 번역됩니다.</div></div>
+</main>
+<footer>
+  <div class="bar">
+    <button id="mic" title="말하기 / Magsalita">🎤</button>
+    <div class="typing">
+      <div id="interim"></div>
+      <form id="typeform">
+        <input type="text" id="typed" placeholder="또는 여기에 입력하고 Enter" autocomplete="off">
+        <button type="submit">번역</button>
+      </form>
+    </div>
+  </div>
+</footer>
+<script>
+(() => {
+  const NAMES = { ko:"한국어", tl:"Tagalog", en:"English", ja:"日本語", zh:"中文", vi:"Tiếng Việt",
+                  id:"Bahasa Indonesia", th:"ไทย", ne:"नेपाली", bn:"বাংলা", ur:"اردو", km:"ខ្មែរ" };
+  const BCP47 = { ko:"ko-KR", tl:"fil-PH", en:"en-US", ja:"ja-JP", zh:"zh-CN", vi:"vi-VN", id:"id-ID",
+                  th:"th-TH", ne:"ne-NP", bn:"bn-BD", ur:"ur-PK", km:"km-KH" };
+  const VOICE_PREFIX = { tl:["fil","tl"] };   // speechSynthesis voice lang prefixes that differ from our code
+
+  const $ = (id) => document.getElementById(id);
+  const srcSel = $("source"), dstSel = $("target"), log = $("log"), mic = $("mic"),
+        interim = $("interim"), status = $("status"), notice = $("notice"), autosay = $("autosay");
+
+  for (const sel of [srcSel, dstSel]) {
+    for (const [code, name] of Object.entries(NAMES)) {
+      const o = document.createElement("option"); o.value = code; o.textContent = name; sel.appendChild(o);
+    }
+  }
+  srcSel.value = localStorage.getItem("vt.source") || "ko";
+  dstSel.value = localStorage.getItem("vt.target") || "tl";
+  autosay.checked = localStorage.getItem("vt.autosay") === "1";
+  const persist = () => { localStorage.setItem("vt.source", srcSel.value); localStorage.setItem("vt.target", dstSel.value);
+                          localStorage.setItem("vt.autosay", autosay.checked ? "1" : "0"); };
+  autosay.addEventListener("change", persist);
+
+  // ---- backend status -------------------------------------------------
+  let backendName = "";
+  async function checkHealth() {
+    try {
+      const r = await fetch("/api/health"); const h = await r.json();
+      backendName = h.backend;
+      status.textContent = `${h.backend} · ${h.ready ? "준비됨" : "준비 안 됨"}`;
+      status.className = "pill " + (h.ready ? "ok" : "bad");
+      status.title = h.detail;
+      notice.textContent = h.ready ? "" : `번역 백엔드가 준비되지 않았습니다: ${h.detail}`;
+    } catch (e) {
+      status.textContent = "서버 연결 실패"; status.className = "pill bad";
+    }
+  }
+  checkHealth(); setInterval(checkHealth, 15000);
+
+  // ---- transcript rows -------------------------------------------------
+  function addRow(text, source, target) {
+    const empty = log.querySelector(".empty"); if (empty) empty.remove();
+    const row = document.createElement("div"); row.className = "row";
+    row.innerHTML = `<div class="src"><span class="lang"></span><span class="t"></span></div>
+      <div class="dst"><div class="text pending"></div>
+        <div class="meta"><span class="ms"></span><button class="say" title="읽어주기">🔊</button></div></div>`;
+    row.querySelector(".lang").textContent = NAMES[source];
+    row.querySelector(".t").textContent = text;
+    const say = row.querySelector(".say");
+    say.disabled = true;
+    say.addEventListener("click", () => speak(row.querySelector(".dst .text").textContent, target));
+    log.appendChild(row);
+    row.scrollIntoView({ block: "end", behavior: "smooth" });
+    return row;
+  }
+
+  async function translate(text, source, target) {
+    const row = addRow(text, source, target);
+    const out = row.querySelector(".dst .text"), ms = row.querySelector(".ms"), say = row.querySelector(".say");
+    let acc = "";
+    try {
+      const r = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" },
+                                               body: JSON.stringify({ text, source, target }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
+      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          const ev = JSON.parse(line);
+          if (ev.delta) { acc += ev.delta; out.textContent = acc; }
+          if (ev.done) {
+            out.textContent = ev.text; out.classList.remove("pending");
+            ms.textContent = (ev.ms / 1000).toFixed(1) + "s";
+            say.disabled = !hasVoice(target);
+            if (autosay.checked && hasVoice(target)) speak(ev.text, target);
+          }
+          if (ev.error) throw new Error(ev.error);
+        }
+      }
+      if (out.classList.contains("pending")) throw new Error("응답이 끝나지 않았습니다");
+    } catch (e) {
+      out.textContent = "오류: " + e.message; out.className = "text error";
+    }
+  }
+
+  // ---- speech synthesis ------------------------------------------------
+  let voices = [];
+  const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; };
+  loadVoices(); if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
+  function findVoice(code) {
+    const prefixes = VOICE_PREFIX[code] || [code];
+    return voices.find(v => prefixes.some(p => v.lang.toLowerCase().replace("_", "-").startsWith(p)));
+  }
+  const hasVoice = (code) => !!findVoice(code);
+  function speak(text, code) {
+    const v = findVoice(code); if (!v || !text) return;
+    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang;
+    // Pause the microphone so it does not transcribe the speaker output.
+    const wasListening = listening;
+    if (wasListening) { suspendRecognition = true; recognition.stop(); }
+    u.onend = u.onerror = () => { if (wasListening && listening) { suspendRecognition = false; safeStart(); } };
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }
+
+  // ---- speech recognition ----------------------------------------------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null, listening = false, suspendRecognition = false;
+  if (!SR) {
+    mic.disabled = true; mic.title = "이 브라우저는 음성 인식을 지원하지 않습니다";
+    notice.textContent = "이 브라우저는 Web Speech API를 지원하지 않습니다. Chrome 또는 Safari를 사용하세요. 타이핑 입력은 사용할 수 있습니다.";
+  } else {
+    recognition = new SR();
+    recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 1;
+    recognition.onresult = (ev) => {
+      let interimText = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i]; const t = res[0].transcript.trim();
+        if (!t) continue;
+        if (res.isFinal) translate(t, srcSel.value, dstSel.value); else interimText += t + " ";
+      }
+      interim.textContent = interimText; interim.className = interimText ? "live" : "";
+    };
+    recognition.onerror = (ev) => {
+      if (ev.error === "no-speech" || ev.error === "aborted") return;
+      notice.textContent = "음성 인식 오류: " + ev.error + (ev.error === "not-allowed" ? " (마이크 권한을 허용하세요)" : "");
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") setListening(false);
+    };
+    recognition.onend = () => {
+      interim.textContent = ""; interim.className = "";
+      // Chrome ends sessions after silence; keep going while the user wants to listen.
+      if (listening && !suspendRecognition) setTimeout(safeStart, 150);
+    };
+  }
+  function safeStart() {
+    if (!recognition || !listening) return;
+    recognition.lang = BCP47[srcSel.value];
+    try { recognition.start(); } catch (e) { /* already started */ }
+  }
+  function setListening(on) {
+    listening = on; mic.classList.toggle("on", on); mic.textContent = on ? "■" : "🎤";
+    if (on) { notice.textContent = ""; safeStart(); }
+    else { suspendRecognition = false; try { recognition && recognition.stop(); } catch (e) {} interim.textContent = ""; }
+  }
+  mic.addEventListener("click", () => setListening(!listening));
+
+  // Changing languages restarts recognition with the new language.
+  function onLangChange() {
+    persist();
+    if (srcSel.value === dstSel.value) { notice.textContent = "말하는 언어와 번역할 언어가 같습니다."; return; }
+    notice.textContent = "";
+    if (listening) { suspendRecognition = true; recognition.stop(); setTimeout(() => { suspendRecognition = false; safeStart(); }, 200); }
+  }
+  srcSel.addEventListener("change", onLangChange);
+  dstSel.addEventListener("change", onLangChange);
+  $("swap").addEventListener("click", () => { const s = srcSel.value; srcSel.value = dstSel.value; dstSel.value = s; onLangChange(); });
+
+  // ---- typed input -----------------------------------------------------
+  $("typeform").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const t = $("typed").value.trim(); if (!t) return;
+    $("typed").value = "";
+    translate(t, srcSel.value, dstSel.value);
+  });
+})();
+</script>
+</body>
+</html>
