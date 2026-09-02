@@ -132,6 +132,27 @@ class MuseCommandTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--provider") + 1], "echo")
 
 
+class OllamaRequestTest(unittest.TestCase):
+    def test_request_disables_hidden_thinking(self):
+        """gemma4 spends ~1000 hidden reasoning tokens per sentence unless think is off (37s vs 1s measured)."""
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def __iter__(self):
+                yield json.dumps({"message": {"content": "Kumusta"}, "done": True}).encode()
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        with mock.patch.object(translator.urllib.request, "urlopen", fake_urlopen):
+            events = list(translator.OllamaBackend().translate("안녕", "ko", "tl"))
+        self.assertIs(captured["body"].get("think"), False)
+        self.assertEqual(events[-1], ("done", "Kumusta"))
+
+
 class BackendFactoryTest(unittest.TestCase):
     def test_known_backends(self):
         self.assertIsInstance(translator.get_backend("muse"), translator.MuseBackend)

@@ -226,6 +226,8 @@ class OllamaBackend:
         body = json.dumps({
             "model": self.model,
             "stream": True,
+            # gemma4 otherwise spends ~1000 hidden reasoning tokens per sentence (37s vs 1s measured).
+            "think": False,
             "options": {"temperature": 0.3},
             "messages": [{"role": "user", "content": build_prompt(text, source, target)}],
         }).encode("utf-8")
