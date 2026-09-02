@@ -41,7 +41,7 @@ Cloudflare 임시 터널이 열리고 이런 줄이 출력됩니다. 이 주소�
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
-| `--backend agy\|muse\|ollama\|echo` | `agy` | 번역 백엔드. `agy`는 Antigravity CLI(구독 로그인), `muse`는 Meta Muse Code(결제 필요), `ollama`는 로컬 `gemma4:12B`, `echo`는 배관 테스트용 |
+| `--backend agy\|agy-oneshot\|muse\|ollama\|echo` | `agy` | 번역 백엔드. `agy`는 Antigravity CLI를 한 세션으로 열어 두고 문장을 흘려 넣는 방식(문장당 약 1.5초), `agy-oneshot`은 문장마다 CLI를 새로 띄우는 방식(약 7초), `muse`는 Meta Muse Code(결제 필요), `ollama`는 로컬 `gemma4:12B`, `echo`는 배관 테스트용 |
 | `--lan` | 꺼짐 | 모든 인터페이스에 바인드 + 자체 서명 HTTPS (핸드폰용) |
 | `--public` | 꺼짐 | Cloudflare 임시 터널로 공개 https 주소 발급 (`cloudflared` 필요), 접속 키 자동 생성 |
 | `--key` | 없음 (`VT_ACCESS_KEY`) | `/api/*` 접속 키를 직접 지정. `--public` 없이도 쓸 수 있음 |
@@ -57,6 +57,10 @@ Cloudflare 임시 터널이 열리고 이런 줄이 출력됩니다. 이 주소�
 4. 🔊 로 아무 행이나 다시 읽을 수 있습니다.
 
 읽어주기 음성은 서버가 만듭니다(`GET /api/tts`, `uvx edge-tts` 로 Microsoft Edge 신경망 음성, 타갈로그 `fil-PH-BlessicaNeural`). Mac·iPhone에는 타갈로그 음성이 없기 때문입니다. 첫 호출 때 `uv` 가 edge-tts 패키지를 내려받습니다. 서버 TTS가 실패하면 브라우저 내장 음성으로 대체합니다. 읽어주는 동안에는 마이크를 잠시 멈춰 스피커 소리를 다시 받아 적지 않게 합니다.
+
+## 실시간에 가깝게: 세션 방식
+
+기본 `agy` 백엔드는 서버가 뜰 때 `agy --input-format stream-json` 프로세스를 하나 띄워 통역 지시를 넣어 두고, 문장마다 `[Korean -> Tagalog]\n문장` 한 줄만 보냅니다. CLI 기동 5초가 사라져 문장 끝에서 번역까지 1.5~2초, 음성까지 약 3초입니다. 프로세스가 죽거나 200문장을 넘기면 자동으로 다시 띄웁니다. 한 번에 한 문장씩 처리하므로 여러 문장이 겹치면 순서대로 줄을 섭니다.
 
 ## muse가 "402 Payment Required" 를 내면
 

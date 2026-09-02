@@ -11,6 +11,18 @@ import translator
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(HERE, "fixtures", "echo_run.jsonl")
 FIXTURE_402 = os.path.join(HERE, "fixtures", "meta_402.jsonl")
+FIXTURE_STREAM = os.path.join(HERE, "fixtures", "agy_stream.jsonl")
+
+STUB_SESSION = r"""#!/bin/sh
+# Fake `agy --input-format stream-json`: answers every stdin line with a streamed reply + result.
+printf '%s\n' '{"event":"init","conversation_id":"c1","init":{"model":"stub"}}'
+while IFS= read -r line; do
+  case "$line" in *DIE*) exit 3;; esac
+  printf '%s\n' '{"event":"step_update","step_update":{"step_type":"agent_response","state":"ACTIVE","text_delta":"Kumus"}}'
+  printf '%s\n' '{"event":"step_update","step_update":{"step_type":"agent_response","state":"DONE","text_delta":"ta"}}'
+  printf '%s\n' "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"Kumusta pid=$$\"}}"
+done
+"""
 
 
 class BuildPromptTest(unittest.TestCase):
@@ -204,9 +216,92 @@ class AgyBackendTest(unittest.TestCase):
             self.assertIn("timed out", events[-1][1])
 
 
+class AgyStreamParseTest(unittest.TestCase):
+    """Real `agy --output-format stream-json` events (fixtures/agy_stream.jsonl)."""
+
+    def setUp(self):
+        with open(FIXTURE_STREAM, encoding="utf-8") as f:
+            self.lines = [l for l in f.read().splitlines() if l.strip()]
+
+    def test_turn_boundaries_and_deltas(self):
+        kinds = [translator.parse_stream_line(l) for l in self.lines]
+        self.assertIsNone(kinds[0])                                   # init
+        self.assertIsNone(kinds[1])                                   # user_input step
+        self.assertEqual(kinds[2], ("delta", "Kamusta, kamusta\n"))
+        self.assertEqual(kinds[3], ("result", "Kamusta, kamusta"))
+        results = [k for k in kinds if k and k[0] == "result"]
+        self.assertEqual([r[1] for r in results], ["Kamusta, kamusta", "화장실이 어디에 있나요?"])
+        deltas = [k for k in kinds[4:] if k and k[0] == "delta"]
+        self.assertEqual("".join(d[1] for d in deltas).strip(), "화장실이 어디에 있나요?")
+
+    def test_error_result_and_garbage(self):
+        self.assertEqual(translator.parse_stream_line('{"event":"result","result":{"status":"ERROR","error":"quota"}}'),
+                         ("error", "agy ERROR: quota"))
+        self.assertIsNone(translator.parse_stream_line("garbage"))
+
+    def test_turn_prompt_names_direction(self):
+        p = translator.session_turn_prompt("안녕", "ko", "tl")
+        self.assertIn("Korean", p); self.assertIn("Tagalog", p); self.assertIn("안녕", p)
+        with self.assertRaises(ValueError):
+            translator.session_turn_prompt("x", "ko", "xx")
+
+
+class AgySessionTest(unittest.TestCase):
+    """One long-lived agy process serves many sentences; it is restarted when it dies."""
+
+    def _stub(self, d):
+        stub = os.path.join(d, "agy")
+        with open(stub, "w") as f:
+            f.write(STUB_SESSION)
+        os.chmod(stub, 0o755)
+        return stub
+
+    def test_reuses_one_process_across_turns_and_streams_deltas(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = translator.AgySessionBackend(agy_bin=self._stub(d))
+            try:
+                e1 = list(b.translate("안녕", "ko", "tl"))
+                e2 = list(b.translate("고마워", "ko", "tl"))
+            finally:
+                b.close()
+            self.assertEqual([k for k, _ in e1 if k == "delta"], ["delta", "delta"])
+            self.assertTrue(e1[-1][1].startswith("Kumusta pid="))
+            self.assertEqual(e1[-1][1], e2[-1][1])  # same pid -> same process
+
+    def test_restarts_after_process_death(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = translator.AgySessionBackend(agy_bin=self._stub(d))
+            try:
+                first = list(b.translate("안녕", "ko", "tl"))[-1][1]
+                dead = list(b.translate("DIE", "ko", "tl"))
+                self.assertEqual(dead[-1][0], "error")
+                again = list(b.translate("다시", "ko", "tl"))[-1]
+            finally:
+                b.close()
+            self.assertEqual(again[0], "done")
+            self.assertNotEqual(again[1], first)  # a new process answered
+
+    def test_turn_timeout_restarts_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "agy")
+            with open(stub, "w") as f:
+                f.write("#!/bin/sh\necho '{\"event\":\"init\"}'\nexec sleep 60\n")
+            os.chmod(stub, 0o755)
+            b = translator.AgySessionBackend(agy_bin=stub, turn_timeout=1)
+            try:
+                t0 = time.monotonic()
+                ev = list(b.translate("안녕", "ko", "tl"))
+            finally:
+                b.close()
+            self.assertLess(time.monotonic() - t0, 10)
+            self.assertEqual(ev[-1][0], "error")
+            self.assertIn("timed out", ev[-1][1])
+
+
 class BackendFactoryTest(unittest.TestCase):
     def test_agy_backend(self):
-        self.assertIsInstance(translator.get_backend("agy"), translator.AgyBackend)
+        self.assertIsInstance(translator.get_backend("agy"), translator.AgySessionBackend)
+        self.assertIsInstance(translator.get_backend("agy-oneshot"), translator.AgyBackend)
 
     def test_known_backends(self):
         self.assertIsInstance(translator.get_backend("muse"), translator.MuseBackend)

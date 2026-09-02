@@ -307,7 +307,7 @@ def ensure_self_signed_cert(cert_dir: str, hosts: list[str]) -> tuple[str, str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="voice translator web server")
-    ap.add_argument("--backend", default="agy", choices=["agy", "muse", "ollama", "echo"])
+    ap.add_argument("--backend", default="agy", choices=["agy", "agy-oneshot", "muse", "ollama", "echo"])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--lan", action="store_true",
@@ -323,6 +323,15 @@ def main(argv=None) -> int:
 
     Handler.backend = translator.get_backend(args.backend)
     ready, detail = Handler.backend.ready()
+    if ready and hasattr(Handler.backend, "warm"):
+        # Start the interpreter session now so the first sentence does not pay the CLI start-up.
+        def _warm():
+            try:
+                Handler.backend.warm()
+                print("interpreter session ready", flush=True)
+            except Exception as e:  # noqa: BLE001 - report, keep serving
+                print(f"WARNING: interpreter session did not start: {e}", flush=True)
+        threading.Thread(target=_warm, daemon=True).start()
     host = "0.0.0.0" if args.lan else args.host
     httpd = ThreadingHTTPServer((host, args.port), Handler)
     httpd.daemon_threads = True
@@ -361,6 +370,8 @@ def main(argv=None) -> int:
     finally:
         if tunnel is not None:
             tunnel.terminate()
+        if hasattr(Handler.backend, "close"):
+            Handler.backend.close()
         httpd.server_close()
     return 0
 
