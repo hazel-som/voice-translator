@@ -10,6 +10,7 @@ import translator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(HERE, "fixtures", "echo_run.jsonl")
+FIXTURE_402 = os.path.join(HERE, "fixtures", "meta_402.jsonl")
 
 
 class BuildPromptTest(unittest.TestCase):
@@ -60,6 +61,47 @@ class ParseMuseLineTest(unittest.TestCase):
         rec["payload"]["reason"] = "boom"
         rec["payload"]["text"] = ""
         self.assertEqual(translator.parse_muse_line(json.dumps(rec)), ("error", "boom"))
+
+
+class ProviderStatusTest(unittest.TestCase):
+    """Real `muse exec --json` output from a run where the Meta API answered 402 on every attempt."""
+
+    def setUp(self):
+        with open(FIXTURE_402, encoding="utf-8") as f:
+            self.lines = [l for l in f.read().splitlines() if l.strip()]
+        self.by_seq = {json.loads(l)["sequence"]: l for l in self.lines}
+
+    def test_opening_stream_is_a_status_event(self):
+        kind, msg = translator.parse_muse_line(self.by_seq[12])
+        self.assertEqual(kind, "status")
+        self.assertIn("attempt 1/10", msg)
+
+    def test_402_retry_is_a_fatal_error_with_billing_hint(self):
+        kind, msg = translator.parse_muse_line(self.by_seq[13])
+        self.assertEqual(kind, "error")
+        self.assertIn("402", msg)
+        self.assertIn(translator.META_BILLING_URL, msg)
+
+    def test_transient_http_retry_stays_a_status(self):
+        rec = json.loads(self.by_seq[13])
+        rec["payload"]["event"]["details"]["facets"][0]["http_status"] = 503
+        rec["payload"]["event"]["message"] = "retrying meta model stream in 1000ms (attempt 2/10)"
+        kind, msg = translator.parse_muse_line(json.dumps(rec))
+        self.assertEqual(kind, "status")
+        self.assertIn("503", msg)
+
+    def test_backend_fails_fast_on_402_instead_of_waiting_for_retries(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "muse")
+            with open(stub, "w") as f:
+                f.write(f"#!/bin/sh\nhead -13 '{FIXTURE_402}'\nexec sleep 60\n")
+            os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+            t0 = time.monotonic()
+            events = list(translator.MuseBackend(muse_bin=stub).translate("안녕", "ko", "tl"))
+            self.assertLess(time.monotonic() - t0, 10)
+            self.assertEqual(events[-1][0], "error")
+            self.assertIn("402", events[-1][1])
+            self.assertTrue(any(e[0] == "status" for e in events))
 
 
 class CleanOutputTest(unittest.TestCase):

@@ -40,6 +40,9 @@
   .row .dst .text { flex: 1; white-space: pre-wrap; word-break: break-word; }
   .row .dst .text.pending::after { content: "…"; animation: blink 1s steps(2) infinite; color: var(--muted); }
   .row .dst .text.error { color: var(--bad); font-size: 14px; }
+  .row .dst .text.error a { color: inherit; }
+  .row .status { font-size: 12px; color: var(--muted); padding: 0 14px 8px; background: var(--dst-bg); }
+  .row .status:empty { display: none; }
   .row .meta { flex: none; display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
   .row button.say { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; cursor: pointer; }
   .row button.say:disabled { opacity: .4; cursor: default; }
@@ -135,7 +138,8 @@
     const row = document.createElement("div"); row.className = "row";
     row.innerHTML = `<div class="src"><span class="lang"></span><span class="t"></span></div>
       <div class="dst"><div class="text pending"></div>
-        <div class="meta"><span class="ms"></span><button class="say" title="읽어주기">🔊</button></div></div>`;
+        <div class="meta"><span class="ms"></span><button class="say" title="읽어주기">🔊</button></div></div>
+      <div class="status"></div>`;
     row.querySelector(".lang").textContent = NAMES[source];
     row.querySelector(".t").textContent = text;
     const say = row.querySelector(".say");
@@ -148,7 +152,8 @@
 
   async function translate(text, source, target) {
     const row = addRow(text, source, target);
-    const out = row.querySelector(".dst .text"), ms = row.querySelector(".ms"), say = row.querySelector(".say");
+    const out = row.querySelector(".dst .text"), ms = row.querySelector(".ms"), say = row.querySelector(".say"),
+          statusEl = row.querySelector(".status");
     let acc = "";
     try {
       const r = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -164,9 +169,10 @@
           const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
           if (!line.trim()) continue;
           const ev = JSON.parse(line);
-          if (ev.delta) { acc += ev.delta; out.textContent = acc; }
+          if (ev.status) statusEl.textContent = ev.status;
+          if (ev.delta) { acc += ev.delta; out.textContent = acc; statusEl.textContent = ""; }
           if (ev.done) {
-            out.textContent = ev.text; out.classList.remove("pending");
+            out.textContent = ev.text; out.classList.remove("pending"); statusEl.textContent = "";
             ms.textContent = (ev.ms / 1000).toFixed(1) + "s";
             say.disabled = !hasVoice(target);
             if (autosay.checked && hasVoice(target)) speak(ev.text, target);
@@ -176,7 +182,12 @@
       }
       if (out.classList.contains("pending")) throw new Error("응답이 끝나지 않았습니다");
     } catch (e) {
-      out.textContent = "오류: " + e.message; out.className = "text error";
+      statusEl.textContent = "";
+      out.className = "text error"; out.textContent = "오류: ";
+      // Turn a bare https URL in the message into a link (error text is from our own server).
+      const m = /^(.*?)(https:\/\/\S+)(.*)$/.exec(e.message);
+      if (m) { out.append(m[1]); const a = document.createElement("a"); a.href = m[2]; a.target = "_blank"; a.textContent = m[2]; out.append(a, m[3]); }
+      else out.append(e.message);
     }
   }
 

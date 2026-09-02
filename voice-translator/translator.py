@@ -18,6 +18,13 @@ DEFAULT_MUSE_BIN = os.path.expanduser("~/.local/bin/muse")
 MUSE_TIMEOUT_SECONDS = 90
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:12B")
+META_BILLING_URL = "https://accountscenter.meta.com/muse_code/?ep=no_payg"
+# Provider HTTP errors that will not go away by retrying; muse retries them up to 10x anyway.
+FATAL_HTTP = {
+    401: "Meta API 401: 로그인이 유효하지 않습니다. `muse login` 을 다시 실행하세요.",
+    402: f"Meta API 402 Payment Required: Meta Model API 계정에 결제 설정이 필요합니다. {META_BILLING_URL}",
+    403: "Meta API 403: 이 계정은 모델 API 사용 권한이 없습니다.",
+}
 
 LANGUAGES = {
     "ko": "Korean",
@@ -75,6 +82,20 @@ def parse_muse_line(line: str) -> Event | None:
     if ptype == "run.output.delta":
         text = payload.get("text")
         return ("delta", text) if text else None
+    if ptype == "task.lifecycle.status":
+        event = payload.get("event") or {}
+        details = event.get("details") or {}
+        message = event.get("message") or details.get("phase") or "status"
+        if details.get("phase") == "retry_scheduled":
+            status = None
+            for facet in details.get("facets") or []:
+                if facet.get("kind") == "external_attempt":
+                    status = facet.get("http_status")
+            if status in FATAL_HTTP:
+                return ("error", FATAL_HTTP[status])
+            if status:
+                message = f"{message} (HTTP {status})"
+        return ("status", message)
     if ptype == "run.terminal.completed":
         if payload.get("terminal") == "completed":
             text = (payload.get("text") or "").strip()
@@ -150,12 +171,14 @@ class MuseBackend:
                     ev = parse_muse_line(line)
                     if ev is None:
                         continue
-                    if ev[0] == "delta":
+                    if ev[0] in ("delta", "status"):
                         yield ev
                     elif ev[0] == "done":
                         done_text = ev[1]
                     else:
                         error = ev[1]
+                        proc.kill()  # fatal: do not sit through muse's retry ladder
+                        break
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:

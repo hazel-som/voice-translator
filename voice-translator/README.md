@@ -30,6 +30,13 @@ python3 voice-translator/server.py
 3. 마이크 대신 아래 입력창에 타이핑해서 Enter 를 눌러도 됩니다.
 4. 🔊 로 번역문을 읽어줍니다. macOS에는 타갈로그 음성이 없어서 Tagalog 방향은 비활성화됩니다 (한국어 방향은 됩니다).
 
+## muse가 "402 Payment Required" 를 내면
+
+`muse login` 이 성공해도 Meta Model API 계정에 결제(pay-as-you-go) 설정이 없으면 모든 모델 호출이 HTTP 402로 거부됩니다.
+muse는 이를 최대 10회 지수 백오프로 재시도하므로, 이 앱은 402/401/403을 보는 즉시 호출을 끊고 행에 오류와 결제 링크를 표시합니다.
+결제 설정: https://accountscenter.meta.com/muse_code/?ep=no_payg (터미널 `muse` 실행 시 Ctrl+Enter 로 여는 것과 같은 페이지).
+결제 전에 앱을 써 보려면 `--backend ollama` 를 쓰세요.
+
 ## 테스트
 
 ```bash

@@ -5,8 +5,8 @@
 
 GET  /               -> index.html
 GET  /api/health     -> {"backend": ..., "ready": bool, "detail": str}
-POST /api/translate  -> NDJSON stream: {"delta": str}* then {"done": true, "text": str, "ms": int}
-                        or {"error": str}
+POST /api/translate  -> NDJSON stream: ({"status": str} | {"delta": str})* then
+                        {"done": true, "text": str, "ms": int} or {"error": str}
 """
 from __future__ import annotations
 
@@ -98,6 +98,8 @@ class Handler(BaseHTTPRequestHandler):
                 for kind, payload in self.backend.translate(text, source, target):
                     if kind == "delta":
                         self._write_line({"delta": payload})
+                    elif kind == "status":
+                        self._write_line({"status": payload})
                     elif kind == "done":
                         ms = int((time.monotonic() - started) * 1000)
                         self._write_line({"done": True, "text": payload, "ms": ms})

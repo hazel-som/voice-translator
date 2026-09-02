@@ -22,6 +22,7 @@
 - `--reasoning-effort none` 은 meta provider에서 거부됨 → `minimal` 사용. `--max-model-steps 1`, `--user-input-auto-resolve` 로 도구 호출·질문 없이 한 스텝만 돌린다.
 - 최상위 옵션(`--no-session-log` 등)은 `exec` 앞에 둘 수 없다. 세션 로그는 `~/.local/share/muse` 에 남는다.
 - 로그인은 기기 코드 방식(`muse login`)으로 사용자만 할 수 있다. 미로그인 시 `missing meta credentials` 로 즉시 실패한다.
+- 로그인 후에도 Meta Model API 계정에 결제 설정이 없으면 모델 호출이 **HTTP 402** 로 거부된다 (2026-09-02 실측). muse는 `task.lifecycle.status` 이벤트(`phase: retry_scheduled`, facet `http_status`)를 내며 최대 10회 지수 백오프 재시도한다. 앱은 401/402/403을 보면 즉시 프로세스를 죽이고 결제 안내(`https://accountscenter.meta.com/muse_code/?ep=no_payg`)를 오류로 보낸다. 그 외 상태는 `{"status": …}` 로 UI에 흘린다.
 
 ## 3. 아키텍처
 
