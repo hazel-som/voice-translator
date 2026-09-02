@@ -55,3 +55,4 @@ voice-translator/
 - 2026-09-02 (같은 날, 사용자 결정): Meta 결제를 하지 않기로 함 → 번역 백엔드 기본값을 **Antigravity CLI `agy -p --output-format json`** (Google 구독 로그인, `~/.gemini/antigravity-cli/`) 로 변경. 모델 기본 `gemini-3.7-flash-low`. 문장당 약 6초(모델 1초 + CLI 기동 5초). 프롬프트는 argv로만 전달 가능(stdin 모드 없음). 출력은 `{"status":"SUCCESS","response":…}` 한 줄.
 - 로컬 ollama gemma4:12B는 `think:false` 로 1~2초까지 빨라졌으나 타갈로그 품질이 낮아("안녕하세요, 안녕하세요" → "halo, kumusta po kayo") 사용자 요청으로 사용 중단. 백엔드는 남겨 둠.
 - 핸드폰 지원: `--lan` 플래그 = 0.0.0.0 바인드 + openssl 자체 서명 인증서(SAN에 LAN IP 포함, `certs/` gitignore) HTTPS. 브라우저가 마이크를 https/localhost에서만 허용하기 때문.
+- 사용자 요구(2026-09-02 저녁): ①자동 읽어주기 항상 켜짐 ②열 때 항상 한국어→타갈로그어 ③언어 선택 UI 유지. 타갈로그 음성이 Mac·iOS에 없어 **서버 TTS** 추가: `GET /api/tts?text&lang` → `uvx edge-tts --voice fil-PH-BlessicaNeural` (Microsoft Edge 무료 신경망 음성, 문장당 약 0.8초, mp3 메모리 캐시 200개). 브라우저는 `<audio>` 하나를 마이크 첫 탭에서 unlock 해 두고 재사용(iOS 자동재생 제한 우회), 재생 중 인식 일시정지, 실패 시 speechSynthesis 폴백. 방향·자동읽기 설정은 더 이상 localStorage에 저장하지 않는다.

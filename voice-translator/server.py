@@ -8,12 +8,16 @@ same Wi-Fi can use the microphone (browsers only allow it on https:// or localho
 
 GET  /               -> index.html
 GET  /api/health     -> {"backend": ..., "ready": bool, "detail": str}
+GET  /api/tts?text=&lang= -> audio/mpeg (Microsoft Edge neural voices via `uvx edge-tts`; the browser
+                        falls back to speechSynthesis when this fails)
 POST /api/translate  -> NDJSON stream: ({"status": str} | {"delta": str})* then
                         {"done": true, "text": str, "ms": int} or {"error": str}
 """
 from __future__ import annotations
 
 import argparse
+import collections
+import hashlib
 import json
 import os
 import socket
@@ -21,7 +25,9 @@ import ssl
 import subprocess
 import sys
 import threading
+import tempfile
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import translator
@@ -31,6 +37,53 @@ INDEX = os.path.join(HERE, "index.html")
 CERT_DIR = os.path.join(HERE, "certs")
 MAX_TEXT_CHARS = 2000
 MAX_CONCURRENT = 2
+
+# Server-side text-to-speech. Phones and macOS ship no Tagalog voice, so the browser cannot read
+# translations aloud by itself; Edge's free neural voices cover fil-PH. Run through uvx so the
+# server itself stays dependency-free (first call downloads the edge-tts package).
+TTS_BIN = ["uvx", "edge-tts"]
+TTS_TIMEOUT_SECONDS = 30
+TTS_VOICES = {
+    "tl": "fil-PH-BlessicaNeural", "ko": "ko-KR-SunHiNeural", "en": "en-US-JennyNeural",
+    "ja": "ja-JP-NanamiNeural", "zh": "zh-CN-XiaoxiaoNeural", "vi": "vi-VN-HoaiMyNeural",
+    "id": "id-ID-GadisNeural", "th": "th-TH-PremwadeeNeural", "ne": "ne-NP-HemkalaNeural",
+    "bn": "bn-BD-NabanitaNeural", "ur": "ur-PK-UzmaNeural", "km": "km-KH-SreymomNeural",
+}
+TTS_CACHE: "collections.OrderedDict[str, bytes]" = collections.OrderedDict()
+TTS_CACHE_MAX = 200
+TTS_LOCK = threading.Lock()
+
+
+def voice_for(lang: str):
+    return TTS_VOICES.get(lang)
+
+
+def tts_command(text: str, voice: str, out_path: str) -> list[str]:
+    return TTS_BIN + ["--voice", voice, "--text", text, "--write-media", out_path]
+
+
+def synthesize(text: str, lang: str) -> bytes:
+    voice = voice_for(lang)
+    if not voice:
+        raise ValueError(f"no voice for language {lang!r}")
+    key = hashlib.sha1(f"{voice}\x00{text}".encode("utf-8")).hexdigest()
+    with TTS_LOCK:
+        if key in TTS_CACHE:
+            TTS_CACHE.move_to_end(key)
+            return TTS_CACHE[key]
+    with tempfile.TemporaryDirectory(prefix="vt-tts-") as d:
+        out = os.path.join(d, "out.mp3")
+        subprocess.run(tts_command(text, voice, out), check=True, capture_output=True,
+                       timeout=TTS_TIMEOUT_SECONDS)
+        with open(out, "rb") as f:
+            data = f.read()
+    if not data:
+        raise RuntimeError("tts produced no audio")
+    with TTS_LOCK:
+        TTS_CACHE[key] = data
+        while len(TTS_CACHE) > TTS_CACHE_MAX:
+            TTS_CACHE.popitem(last=False)
+    return data
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -65,10 +118,29 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
+        elif path == "/api/tts":
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            text = (qs.get("text") or [""])[0].strip()
+            lang = (qs.get("lang") or [""])[0]
+            if not text or len(text) > MAX_TEXT_CHARS:
+                return self._json(400, {"error": "text is required (max %d chars)" % MAX_TEXT_CHARS})
+            if not voice_for(lang):
+                return self._json(404, {"error": f"no voice for {lang!r}"})
+            try:
+                data = synthesize(text, lang)
+            except (subprocess.SubprocessError, OSError, RuntimeError) as e:
+                self.log_message("tts failed: %s", e)
+                return self._json(503, {"error": f"tts failed: {type(e).__name__}"})
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=3600")
+            self.end_headers()
+            self.wfile.write(data)
         elif path == "/api/health":
             ready, detail = self.backend.ready()
             self._json(200, {"backend": self.backend.name, "ready": ready, "detail": detail,
-                             "languages": translator.LANGUAGES})
+                             "languages": translator.LANGUAGES, "tts": sorted(TTS_VOICES)})
         else:
             self._json(404, {"error": "not found"})
 

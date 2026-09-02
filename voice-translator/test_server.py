@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 
 import server
 
@@ -46,3 +47,34 @@ class LanAddressesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TtsTest(unittest.TestCase):
+    def test_voice_for_known_and_unknown_language(self):
+        self.assertEqual(server.voice_for("tl"), "fil-PH-BlessicaNeural")
+        self.assertEqual(server.voice_for("ko"), "ko-KR-SunHiNeural")
+        self.assertIsNone(server.voice_for("xx"))
+
+    def test_tts_command_passes_voice_text_and_output(self):
+        cmd = server.tts_command("Kumusta", "fil-PH-BlessicaNeural", "/tmp/o.mp3")
+        self.assertEqual(cmd[cmd.index("--voice") + 1], "fil-PH-BlessicaNeural")
+        self.assertEqual(cmd[cmd.index("--text") + 1], "Kumusta")
+        self.assertEqual(cmd[cmd.index("--write-media") + 1], "/tmp/o.mp3")
+
+    def test_synthesize_returns_audio_bytes_and_caches(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "fake-tts")
+            with open(stub, "w") as f:
+                f.write('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = "--write-media" ] && out="$2"; shift; done\n'
+                        'printf "MP3DATA-$$" > "$out"\n')
+            os.chmod(stub, 0o755)
+            with unittest.mock.patch.object(server, "TTS_BIN", [stub]):
+                server.TTS_CACHE.clear()
+                a = server.synthesize("Kumusta", "tl")
+                b = server.synthesize("Kumusta", "tl")
+            self.assertTrue(a.startswith(b"MP3DATA-"))
+            self.assertEqual(a, b)  # second call served from cache (same pid suffix)
+
+    def test_synthesize_unknown_language_raises(self):
+        with self.assertRaises(ValueError):
+            server.synthesize("hi", "xx")

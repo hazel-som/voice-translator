@@ -109,19 +109,17 @@
       const o = document.createElement("option"); o.value = code; o.textContent = name; sel.appendChild(o);
     }
   }
-  srcSel.value = localStorage.getItem("vt.source") || "ko";
-  dstSel.value = localStorage.getItem("vt.target") || "tl";
-  autosay.checked = localStorage.getItem("vt.autosay") === "1";
-  const persist = () => { localStorage.setItem("vt.source", srcSel.value); localStorage.setItem("vt.target", dstSel.value);
-                          localStorage.setItem("vt.autosay", autosay.checked ? "1" : "0"); };
-  autosay.addEventListener("change", persist);
+  // Always start as "I speak Korean -> Tagalog" with auto-read on; the selectors and the
+  // checkbox still work for the rest of the session, they are just not remembered.
+  srcSel.value = "ko"; dstSel.value = "tl"; autosay.checked = true;
+  const persist = () => {};
 
   // ---- backend status -------------------------------------------------
   let backendName = "";
   async function checkHealth() {
     try {
       const r = await fetch("/api/health"); const h = await r.json();
-      backendName = h.backend;
+      backendName = h.backend; serverTts = h.tts || [];
       status.textContent = `${h.backend} · ${h.ready ? "준비됨" : "준비 안 됨"}`;
       status.className = "pill " + (h.ready ? "ok" : "bad");
       status.title = h.detail;
@@ -191,7 +189,10 @@
     }
   }
 
-  // ---- speech synthesis ------------------------------------------------
+  // ---- speech output ---------------------------------------------------
+  // Translations are read by the server's TTS (/api/tts, Edge neural voices, has Tagalog).
+  // The browser's own voices are only a fallback when the server cannot synthesize.
+  let serverTts = [];
   let voices = [];
   const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; };
   loadVoices(); if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
@@ -199,15 +200,58 @@
     const prefixes = VOICE_PREFIX[code] || [code];
     return voices.find(v => prefixes.some(p => v.lang.toLowerCase().replace("_", "-").startsWith(p)));
   }
-  const hasVoice = (code) => !!findVoice(code);
+  const hasVoice = (code) => serverTts.includes(code) || !!findVoice(code);
+
+  // One <audio> element, "unlocked" by the first tap on the mic button so phones let us play
+  // later translations without another gesture.
+  const player = new Audio();
+  player.preload = "auto";
+  let audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    player.src = "data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA"
+      + "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgP//////////////////////"
+      + "//////////////////////////////////8AAABQTEFNRTMuMTAwBK8AAAAAAAAAABSAJAJAQgAAgAAAAnEI"
+      + "uHgAAAAAAAAAAAAAAAAAAAAAAAAA//uQxAADwAABpAAAACAAADSAAAAETEFNRTMuMTAwVVVVVVVVVVVVVVVV"
+      + "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
+    player.play().then(() => { audioUnlocked = true; }).catch(() => {});
+  }
+
+  let speakQueue = Promise.resolve();
   function speak(text, code) {
-    const v = findVoice(code); if (!v || !text) return;
-    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang;
-    // Pause the microphone so it does not transcribe the speaker output.
+    if (!text) return;
+    speakQueue = speakQueue.then(() => speakNow(text, code)).catch(() => {});
+  }
+  function pauseMic() {
     const wasListening = listening;
-    if (wasListening) { suspendRecognition = true; recognition.stop(); }
-    u.onend = u.onerror = () => { if (wasListening && listening) { suspendRecognition = false; safeStart(); } };
-    speechSynthesis.cancel(); speechSynthesis.speak(u);
+    if (wasListening) { suspendRecognition = true; try { recognition.stop(); } catch (e) {} }
+    return () => { if (wasListening && listening) { suspendRecognition = false; safeStart(); } };
+  }
+  async function speakNow(text, code) {
+    const resume = pauseMic();   // do not transcribe our own speaker output
+    try {
+      if (serverTts.includes(code)) {
+        const r = await fetch(`/api/tts?lang=${encodeURIComponent(code)}&text=${encodeURIComponent(text)}`);
+        if (r.ok) {
+          const url = URL.createObjectURL(await r.blob());
+          await new Promise((res) => {
+            player.onended = player.onerror = () => { URL.revokeObjectURL(url); res(); };
+            player.src = url;
+            player.play().catch(() => { notice.textContent = "소리 재생이 차단되었습니다. 마이크 버튼을 한 번 눌러 주세요."; res(); });
+          });
+          return;
+        }
+      }
+      const v = findVoice(code);
+      if (!v || !window.speechSynthesis) return;
+      await new Promise((res) => {
+        const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang;
+        u.onend = u.onerror = res;
+        speechSynthesis.cancel(); speechSynthesis.speak(u);
+      });
+    } finally {
+      resume();
+    }
   }
 
   // ---- speech recognition ----------------------------------------------
@@ -249,7 +293,7 @@
     if (on) { notice.textContent = ""; safeStart(); }
     else { suspendRecognition = false; try { recognition && recognition.stop(); } catch (e) {} interim.textContent = ""; }
   }
-  mic.addEventListener("click", () => setListening(!listening));
+  mic.addEventListener("click", () => { unlockAudio(); setListening(!listening); });
 
   // Changing languages restarts recognition with the new language.
   function onLangChange() {
@@ -267,6 +311,7 @@
     ev.preventDefault();
     const t = $("typed").value.trim(); if (!t) return;
     $("typed").value = "";
+    unlockAudio();
     translate(t, srcSel.value, dstSel.value);
   });
 })();

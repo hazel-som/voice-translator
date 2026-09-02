@@ -32,10 +32,12 @@ python3 voice-translator/server.py --lan
 
 ## 사용
 
-1. 위쪽에서 말하는 언어와 번역할 언어를 고릅니다 (기본 한국어 → Tagalog, ⇄ 버튼으로 뒤집기).
-2. 🎤 버튼을 누르고 말합니다. 문장이 끝나면 자동으로 번역 행이 추가됩니다. 다시 누르면 멈춥니다.
+1. 열면 항상 **한국어 → Tagalog** 로 시작하고 **번역 자동 읽어주기가 켜져** 있습니다. 상대가 말할 차례면 ⇄ 로 뒤집거나 드롭다운에서 언어를 고릅니다 (세션 안에서만 유지).
+2. 🎤 버튼을 누르고 말합니다. 문장이 끝나면 번역 행이 추가되고 바로 소리로 읽어줍니다. 다시 누르면 멈춥니다.
 3. 마이크 대신 아래 입력창에 타이핑해서 Enter 를 눌러도 됩니다.
-4. 🔊 로 번역문을 읽어줍니다. macOS에는 타갈로그 음성이 없어서 Tagalog 방향은 비활성화됩니다 (한국어 방향은 됩니다).
+4. 🔊 로 아무 행이나 다시 읽을 수 있습니다.
+
+읽어주기 음성은 서버가 만듭니다(`GET /api/tts`, `uvx edge-tts` 로 Microsoft Edge 신경망 음성, 타갈로그 `fil-PH-BlessicaNeural`). Mac·iPhone에는 타갈로그 음성이 없기 때문입니다. 첫 호출 때 `uv` 가 edge-tts 패키지를 내려받습니다. 서버 TTS가 실패하면 브라우저 내장 음성으로 대체합니다. 읽어주는 동안에는 마이크를 잠시 멈춰 스피커 소리를 다시 받아 적지 않게 합니다.
 
 ## muse가 "402 Payment Required" 를 내면
 
@@ -52,7 +54,7 @@ python3 -m unittest discover -s voice-translator -p 'test_*.py'
 
 ## 구조
 
-- `server.py` — HTTP 서버. `GET /api/health`, `POST /api/translate` (NDJSON 스트림).
+- `server.py` — HTTP 서버. `GET /api/health`, `POST /api/translate` (NDJSON 스트림), `GET /api/tts` (mp3).
 - `translator.py` — 프롬프트 구성, agy / muse / ollama 백엔드 (muse JSONL 파싱 포함).
 - `index.html` — 단일 페이지 UI.
 - `fixtures/echo_run.jsonl` — `muse exec --json --provider echo` 실제 출력 (파서 테스트 픽스처).
