@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 import tempfile
-import time
+import threading
 import urllib.error
 import urllib.request
 from typing import Iterator
@@ -77,7 +77,10 @@ def parse_muse_line(line: str) -> Event | None:
         return ("delta", text) if text else None
     if ptype == "run.terminal.completed":
         if payload.get("terminal") == "completed":
-            return ("done", payload.get("text") or "")
+            text = (payload.get("text") or "").strip()
+            if not text:
+                return ("error", "muse returned an empty translation")
+            return ("done", text)
         reason = payload.get("reason") or payload.get("terminal") or "muse run did not complete"
         return ("error", str(reason))
     return None
@@ -130,13 +133,20 @@ class MuseBackend:
             )
             done_text: str | None = None
             error: str | None = None
-            deadline = time.monotonic() + MUSE_TIMEOUT_SECONDS
+            timed_out = threading.Event()
+
+            def _kill_on_timeout() -> None:
+                timed_out.set()
+                if proc.poll() is None:
+                    proc.kill()
+
+            # A muse that blocks without printing anything must not hold a request forever.
+            timer = threading.Timer(MUSE_TIMEOUT_SECONDS, _kill_on_timeout)
+            timer.daemon = True
+            timer.start()
             try:
                 assert proc.stdout is not None
                 for line in proc.stdout:
-                    if time.monotonic() > deadline:
-                        error = f"muse timed out after {MUSE_TIMEOUT_SECONDS}s"
-                        break
                     ev = parse_muse_line(line)
                     if ev is None:
                         continue
@@ -151,6 +161,7 @@ class MuseBackend:
                 except subprocess.TimeoutExpired:
                     proc.kill()
             finally:
+                timer.cancel()
                 if proc.poll() is None:
                     proc.kill()
                     proc.wait()
@@ -158,6 +169,8 @@ class MuseBackend:
             for pipe in (proc.stdout, proc.stderr):
                 if pipe:
                     pipe.close()
+            if timed_out.is_set():
+                error = f"muse timed out after {MUSE_TIMEOUT_SECONDS}s"
             if error:
                 yield ("error", error)
             elif done_text is not None:

@@ -1,6 +1,10 @@
 import json
 import os
+import stat
+import tempfile
+import time
 import unittest
+from unittest import mock
 
 import translator
 
@@ -42,6 +46,13 @@ class ParseMuseLineTest(unittest.TestCase):
         self.assertIsNone(translator.parse_muse_line(self.lines[0]))
         self.assertIsNone(translator.parse_muse_line("not json"))
         self.assertIsNone(translator.parse_muse_line(""))
+
+    def test_completed_with_empty_text_becomes_error(self):
+        rec = json.loads(self.lines[-1])
+        rec["payload"]["text"] = "   "
+        kind, msg = translator.parse_muse_line(json.dumps(rec))
+        self.assertEqual(kind, "error")
+        self.assertIn("empty", msg)
 
     def test_failed_terminal_becomes_error(self):
         rec = json.loads(self.lines[-1])
@@ -88,6 +99,24 @@ class BackendFactoryTest(unittest.TestCase):
     def test_unknown_backend(self):
         with self.assertRaises(ValueError):
             translator.get_backend("nope")
+
+
+class MuseTimeoutTest(unittest.TestCase):
+    """A muse that produces no output must be killed after MUSE_TIMEOUT_SECONDS."""
+
+    def test_hung_process_is_killed_and_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "muse")
+            with open(stub, "w") as f:
+                f.write("#!/bin/sh\nexec sleep 60\n")
+            os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+            backend = translator.MuseBackend(muse_bin=stub)
+            t0 = time.monotonic()
+            with mock.patch.object(translator, "MUSE_TIMEOUT_SECONDS", 1):
+                events = list(backend.translate("안녕", "ko", "tl"))
+            self.assertLess(time.monotonic() - t0, 10)
+            self.assertEqual(events[-1][0], "error")
+            self.assertIn("timed out", events[-1][1])
 
 
 class EchoBackendIntegrationTest(unittest.TestCase):
