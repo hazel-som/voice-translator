@@ -15,6 +15,8 @@ import urllib.request
 from typing import Iterator
 
 DEFAULT_MUSE_BIN = os.path.expanduser("~/.local/bin/muse")
+DEFAULT_AGY_BIN = os.path.expanduser("~/.local/bin/agy")
+AGY_MODEL = os.environ.get("AGY_MODEL", "gemini-3.7-flash-low")
 MUSE_TIMEOUT_SECONDS = 90
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:12B")
@@ -204,6 +206,73 @@ class MuseBackend:
                 yield ("error", (detail[-1] if detail else f"muse exited with code {proc.returncode}"))
 
 
+def agy_command(prompt: str, agy_bin: str = DEFAULT_AGY_BIN, model: str = AGY_MODEL) -> list[str]:
+    # agy print mode only accepts the prompt as an argument (no stdin mode), so the spoken
+    # sentence is briefly visible in `ps` on this machine. Acceptable for a personal LAN tool.
+    return [
+        agy_bin, "-p", prompt,
+        "--output-format", "json",
+        "--model", model,
+        "--effort", "low",
+        "--disable-slash-commands",
+    ]
+
+
+def parse_agy_output(stdout: str) -> Event:
+    """`agy -p --output-format json` prints one JSON object: {status, response, error?}."""
+    text = stdout.strip()
+    try:
+        data = json.loads(text[text.index("{"):]) if "{" in text else None
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        return ("error", f"agy returned something that is not json: {text[:200]!r}")
+    if data.get("status") == "SUCCESS":
+        resp = clean_output(data.get("response") or "")
+        return ("done", resp) if resp else ("error", "agy returned an empty translation")
+    return ("error", f"agy {data.get('status', 'ERROR')}: {data.get('error') or data.get('response') or 'unknown error'}")
+
+
+class AgyBackend:
+    """Antigravity CLI (Google) using the user's subscription login, one `agy -p` per sentence."""
+
+    name = "agy"
+
+    def __init__(self, agy_bin: str = DEFAULT_AGY_BIN, model: str = AGY_MODEL):
+        self.agy_bin = agy_bin
+        self.model = model
+        self.name = f"agy/{model}"
+
+    def ready(self) -> tuple[bool, str]:
+        if not os.path.exists(self.agy_bin):
+            return False, f"agy not found at {self.agy_bin}"
+        creds = os.path.expanduser("~/.gemini/antigravity-cli/oauth_creds.json")
+        if not os.path.exists(creds):
+            return False, "Antigravity CLI is not logged in: run `agy` once and sign in"
+        return True, f"antigravity login, model {self.model}"
+
+    def translate(self, text: str, source: str, target: str) -> Iterator[Event]:
+        prompt = build_prompt(text, source, target)
+        with tempfile.TemporaryDirectory(prefix="vt-") as workdir:  # empty cwd: nothing to scan
+            proc = subprocess.Popen(
+                agy_command(prompt, self.agy_bin, self.model), cwd=workdir,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+            )
+            yield ("status", f"{self.model} 호출 중")
+            try:
+                out, err = proc.communicate(timeout=MUSE_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                yield ("error", f"agy timed out after {MUSE_TIMEOUT_SECONDS}s")
+                return
+            if proc.returncode != 0 and not out.strip():
+                last = (err.strip().splitlines() or [f"agy exited with code {proc.returncode}"])[-1]
+                yield ("error", last)
+                return
+            yield parse_agy_output(out)
+
+
 class OllamaBackend:
     name = "ollama"
 
@@ -255,10 +324,12 @@ class OllamaBackend:
 
 
 def get_backend(name: str):
+    if name == "agy":
+        return AgyBackend()
     if name == "muse":
         return MuseBackend()
     if name == "echo":
         return MuseBackend(provider="echo")
     if name == "ollama":
         return OllamaBackend()
-    raise ValueError(f"unknown backend {name!r}; choose muse, ollama, or echo")
+    raise ValueError(f"unknown backend {name!r}; choose agy, muse, ollama, or echo")

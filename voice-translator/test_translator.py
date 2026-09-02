@@ -153,7 +153,61 @@ class OllamaRequestTest(unittest.TestCase):
         self.assertEqual(events[-1], ("done", "Kumusta"))
 
 
+class AgyBackendTest(unittest.TestCase):
+    """Antigravity CLI (`agy -p --output-format json`) using the user's subscription login."""
+
+    def test_command_uses_print_json_and_model(self):
+        cmd = translator.agy_command("PROMPT", agy_bin="/x/agy", model="gemini-3.7-flash-low")
+        self.assertEqual(cmd[0], "/x/agy")
+        self.assertEqual(cmd[cmd.index("-p") + 1], "PROMPT")
+        self.assertEqual(cmd[cmd.index("--output-format") + 1], "json")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "gemini-3.7-flash-low")
+        self.assertIn("--disable-slash-commands", cmd)
+
+    def test_parse_success(self):
+        out = '{"conversation_id":"x","status":"SUCCESS","response":"Nasaan po ang banyo?\n","duration_seconds":1.4}'
+        self.assertEqual(translator.parse_agy_output(out), ("done", "Nasaan po ang banyo?"))
+
+    def test_parse_failure_status(self):
+        out = '{"status":"ERROR","response":"","error":"quota exceeded"}'
+        kind, msg = translator.parse_agy_output(out)
+        self.assertEqual(kind, "error")
+        self.assertIn("quota exceeded", msg)
+
+    def test_parse_garbage(self):
+        kind, msg = translator.parse_agy_output("not json at all")
+        self.assertEqual(kind, "error")
+        self.assertIn("not json", msg)
+
+    def test_stub_binary_round_trip_passes_prompt_as_argument(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "agy")
+            with open(stub, "w") as f:
+                f.write("#!/bin/sh\n"
+                        "case \"$*\" in *'<text>'*) echo '{\"status\":\"SUCCESS\",\"response\":\"Kumusta\"}';;"
+                        " *) echo '{\"status\":\"ERROR\",\"error\":\"no prompt argument\"}';; esac\n")
+            os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+            events = list(translator.AgyBackend(agy_bin=stub).translate("안녕", "ko", "tl"))
+            self.assertEqual(events[-1], ("done", "Kumusta"))
+
+    def test_hung_agy_is_killed(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "agy")
+            with open(stub, "w") as f:
+                f.write("#!/bin/sh\nexec sleep 60\n")
+            os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+            t0 = time.monotonic()
+            with mock.patch.object(translator, "MUSE_TIMEOUT_SECONDS", 1):
+                events = list(translator.AgyBackend(agy_bin=stub).translate("안녕", "ko", "tl"))
+            self.assertLess(time.monotonic() - t0, 10)
+            self.assertEqual(events[-1][0], "error")
+            self.assertIn("timed out", events[-1][1])
+
+
 class BackendFactoryTest(unittest.TestCase):
+    def test_agy_backend(self):
+        self.assertIsInstance(translator.get_backend("agy"), translator.AgyBackend)
+
     def test_known_backends(self):
         self.assertIsInstance(translator.get_backend("muse"), translator.MuseBackend)
         self.assertIsInstance(translator.get_backend("echo"), translator.MuseBackend)
