@@ -101,6 +101,16 @@
   const VOICE_PREFIX = { tl:["fil","tl"] };   // speechSynthesis voice lang prefixes that differ from our code
 
   const $ = (id) => document.getElementById(id);
+
+  // Access key: arrives once as ?key=... (public tunnel), then lives in localStorage.
+  let accessKey = "";
+  try {
+    const u = new URL(location.href);
+    const k = u.searchParams.get("key");
+    if (k) { localStorage.setItem("vt.key", k); u.searchParams.delete("key"); history.replaceState(null, "", u.toString()); }
+    accessKey = localStorage.getItem("vt.key") || "";
+  } catch (e) {}
+  const apiHeaders = (extra) => Object.assign(accessKey ? { "X-Access-Key": accessKey } : {}, extra || {});
   const srcSel = $("source"), dstSel = $("target"), log = $("log"), mic = $("mic"),
         interim = $("interim"), status = $("status"), notice = $("notice"), autosay = $("autosay");
 
@@ -118,7 +128,10 @@
   let backendName = "";
   async function checkHealth() {
     try {
-      const r = await fetch("/api/health"); const h = await r.json();
+      const r = await fetch("/api/health", { headers: apiHeaders() });
+      if (r.status === 401) { status.textContent = "접속 키 필요"; status.className = "pill bad";
+        notice.textContent = "접속 키가 없거나 틀립니다. 서버가 출력한 ?key= 가 붙은 주소로 다시 열어 주세요."; return; }
+      const h = await r.json();
       backendName = h.backend; serverTts = h.tts || [];
       status.textContent = `${h.backend} · ${h.ready ? "준비됨" : "준비 안 됨"}`;
       status.className = "pill " + (h.ready ? "ok" : "bad");
@@ -154,7 +167,7 @@
           statusEl = row.querySelector(".status");
     let acc = "";
     try {
-      const r = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" },
+      const r = await fetch("/api/translate", { method: "POST", headers: apiHeaders({ "Content-Type": "application/json" }),
                                                body: JSON.stringify({ text, source, target }) });
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
       const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
@@ -231,7 +244,7 @@
     const resume = pauseMic();   // do not transcribe our own speaker output
     try {
       if (serverTts.includes(code)) {
-        const r = await fetch(`/api/tts?lang=${encodeURIComponent(code)}&text=${encodeURIComponent(text)}`);
+        const r = await fetch(`/api/tts?lang=${encodeURIComponent(code)}&text=${encodeURIComponent(text)}`, { headers: apiHeaders() });
         if (r.ok) {
           const url = URL.createObjectURL(await r.blob());
           await new Promise((res) => {

@@ -56,3 +56,4 @@ voice-translator/
 - 로컬 ollama gemma4:12B는 `think:false` 로 1~2초까지 빨라졌으나 타갈로그 품질이 낮아("안녕하세요, 안녕하세요" → "halo, kumusta po kayo") 사용자 요청으로 사용 중단. 백엔드는 남겨 둠.
 - 핸드폰 지원: `--lan` 플래그 = 0.0.0.0 바인드 + openssl 자체 서명 인증서(SAN에 LAN IP 포함, `certs/` gitignore) HTTPS. 브라우저가 마이크를 https/localhost에서만 허용하기 때문.
 - 사용자 요구(2026-09-02 저녁): ①자동 읽어주기 항상 켜짐 ②열 때 항상 한국어→타갈로그어 ③언어 선택 UI 유지. 타갈로그 음성이 Mac·iOS에 없어 **서버 TTS** 추가: `GET /api/tts?text&lang` → `uvx edge-tts --voice fil-PH-BlessicaNeural` (Microsoft Edge 무료 신경망 음성, 문장당 약 0.8초, mp3 메모리 캐시 200개). 브라우저는 `<audio>` 하나를 마이크 첫 탭에서 unlock 해 두고 재사용(iOS 자동재생 제한 우회), 재생 중 인식 일시정지, 실패 시 speechSynthesis 폴백. 방향·자동읽기 설정은 더 이상 localStorage에 저장하지 않는다.
+- 외부 접속(사용자 요청, 2026-09-02): `--public` = `cloudflared tunnel --url …` 임시 터널(계정 불필요, 주소는 실행마다 변경) + `/api/*` 접속 키(`X-Access-Key` 헤더 또는 `?key=`, `secrets.compare_digest`). 페이지는 `?key=` 를 localStorage에 옮기고 주소창에서 제거. 서버는 Mac에 남는다(agy 로그인·TTS가 Mac에 있음). 고정 주소는 named tunnel/ngrok 고정 도메인으로 확장 가능.

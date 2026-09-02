@@ -78,3 +78,37 @@ class TtsTest(unittest.TestCase):
     def test_synthesize_unknown_language_raises(self):
         with self.assertRaises(ValueError):
             server.synthesize("hi", "xx")
+
+
+class AccessKeyTest(unittest.TestCase):
+    def test_no_key_configured_allows_everything(self):
+        with unittest.mock.patch.object(server, "ACCESS_KEY", None):
+            self.assertTrue(server.is_authorized({}, "/api/translate"))
+
+    def test_key_in_header_or_query(self):
+        with unittest.mock.patch.object(server, "ACCESS_KEY", "s3cret"):
+            self.assertTrue(server.is_authorized({"X-Access-Key": "s3cret"}, "/api/translate"))
+            self.assertTrue(server.is_authorized({}, "/api/tts?key=s3cret&text=hi"))
+            self.assertFalse(server.is_authorized({"X-Access-Key": "wrong"}, "/api/translate"))
+            self.assertFalse(server.is_authorized({}, "/api/translate"))
+
+    def test_generated_key_is_long_and_url_safe(self):
+        k = server.generate_key()
+        self.assertGreaterEqual(len(k), 16)
+        self.assertRegex(k, r"^[A-Za-z0-9_-]+$")
+
+
+class TunnelTest(unittest.TestCase):
+    def test_tunnel_command_plain_and_tls_origin(self):
+        cmd = server.tunnel_command(8787, tls=False)
+        self.assertEqual(cmd[0], "cloudflared")
+        self.assertIn("http://127.0.0.1:8787", cmd)
+        cmd = server.tunnel_command(8787, tls=True)
+        self.assertIn("https://127.0.0.1:8787", cmd)
+        self.assertIn("--no-tls-verify", cmd)
+
+    def test_parse_tunnel_url(self):
+        line = "2026-09-02T08:00:00Z INF |  https://quiet-owl-1234.trycloudflare.com                                  |"
+        self.assertEqual(server.parse_tunnel_url(line), "https://quiet-owl-1234.trycloudflare.com")
+        self.assertIsNone(server.parse_tunnel_url("INF Registered tunnel connection connIndex=0"))
+        self.assertIsNone(server.parse_tunnel_url("https://api.trycloudflare.com/tunnel"))  # not a hostname URL

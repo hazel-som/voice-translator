@@ -20,12 +20,31 @@ python3 voice-translator/server.py --lan
 인증서가 자체 서명이라 브라우저가 한 번 경고합니다. "고급 → 계속 진행"(Chrome) 또는 "세부사항 보기 → 이 웹사이트 방문"(iOS Safari)으로 넘어가면 됩니다.
 핸드폰 브라우저는 https 에서만 마이크를 허용하기 때문에 `--lan` 은 항상 HTTPS 입니다. Mac에서만 쓸 때는 `--lan` 없이 `http://127.0.0.1:8787/` 로도 됩니다.
 
+### 외부(어디서나)에서 쓰기
+
+```bash
+brew install cloudflared          # 최초 1회
+python3 voice-translator/server.py --lan --public
+```
+
+Cloudflare 임시 터널이 열리고 이런 줄이 출력됩니다. 이 주소를 핸드폰에 보내 열면 됩니다 (정식 인증서라 경고 없음).
+
+```
+  anywhere (share this): https://xxxx-xxxx.trycloudflare.com/?key=AbC...
+```
+
+- 누구나 접근 가능한 주소이므로 `--public` 은 항상 **접속 키**를 요구합니다. 키는 처음 연 뒤 브라우저가 기억하고, 주소창에서는 지워집니다. 키 없이 열면 "접속 키 필요"라고 뜹니다.
+- 주소는 서버를 켤 때마다 바뀝니다 (계정 없는 임시 터널). 고정 주소가 필요하면 Cloudflare 계정 + 도메인으로 named tunnel 을 만들거나 ngrok 고정 도메인을 쓰면 되고, `--key` 로 키를 고정하면 됩니다.
+- 번역(Antigravity 로그인)과 음성이 이 Mac에서 돌기 때문에 **Mac이 켜져 있고 서버가 실행 중이어야** 합니다.
+
 옵션:
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
 | `--backend agy\|muse\|ollama\|echo` | `agy` | 번역 백엔드. `agy`는 Antigravity CLI(구독 로그인), `muse`는 Meta Muse Code(결제 필요), `ollama`는 로컬 `gemma4:12B`, `echo`는 배관 테스트용 |
 | `--lan` | 꺼짐 | 모든 인터페이스에 바인드 + 자체 서명 HTTPS (핸드폰용) |
+| `--public` | 꺼짐 | Cloudflare 임시 터널로 공개 https 주소 발급 (`cloudflared` 필요), 접속 키 자동 생성 |
+| `--key` | 없음 (`VT_ACCESS_KEY`) | `/api/*` 접속 키를 직접 지정. `--public` 없이도 쓸 수 있음 |
 | `--port` | `8787` | 포트 |
 
 환경변수: `AGY_MODEL`(기본 `gemini-3.7-flash-low`, `agy models` 로 목록 확인), `OLLAMA_URL`, `OLLAMA_MODEL`, `META_API_KEY`.

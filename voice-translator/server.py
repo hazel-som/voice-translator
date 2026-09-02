@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Voice translator web server (stdlib only).
 
-    python3 server.py [--backend agy|muse|ollama|echo] [--port 8787] [--lan]
+    python3 server.py [--backend agy|muse|ollama|echo] [--port 8787] [--lan] [--public] [--key K]
 
 --lan binds every interface and serves HTTPS with a self-signed certificate so a phone on the
 same Wi-Fi can use the microphone (browsers only allow it on https:// or localhost).
+--public additionally opens a Cloudflare quick tunnel (`cloudflared`) and prints a public
+https://*.trycloudflare.com URL. Because that URL is reachable by anyone, --public always
+protects /api/* with an access key (random unless --key is given); the printed URL carries it.
 
 GET  /               -> index.html
 GET  /api/health     -> {"backend": ..., "ready": bool, "detail": str}
@@ -20,6 +23,8 @@ import collections
 import hashlib
 import json
 import os
+import re
+import secrets
 import socket
 import ssl
 import subprocess
@@ -52,6 +57,64 @@ TTS_VOICES = {
 TTS_CACHE: "collections.OrderedDict[str, bytes]" = collections.OrderedDict()
 TTS_CACHE_MAX = 200
 TTS_LOCK = threading.Lock()
+
+# Optional shared secret for /api/*. None means open (fine for localhost / home Wi-Fi).
+ACCESS_KEY = None
+TUNNEL_BIN = "cloudflared"
+TUNNEL_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com\b")
+
+
+def generate_key() -> str:
+    return secrets.token_urlsafe(18)
+
+
+def is_authorized(headers, path: str) -> bool:
+    """/api/* needs the key in X-Access-Key or ?key= when ACCESS_KEY is set."""
+    if not ACCESS_KEY:
+        return True
+    given = headers.get("X-Access-Key") if hasattr(headers, "get") else None
+    if not given:
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+        given = (qs.get("key") or [None])[0]
+    return bool(given) and secrets.compare_digest(given, ACCESS_KEY)
+
+
+def tunnel_command(port: int, tls: bool) -> list[str]:
+    origin = f"{'https' if tls else 'http'}://127.0.0.1:{port}"
+    cmd = [TUNNEL_BIN, "tunnel", "--no-autoupdate", "--url", origin]
+    if tls:
+        cmd.append("--no-tls-verify")  # our own self-signed cert
+    return cmd
+
+
+def parse_tunnel_url(line: str):
+    m = TUNNEL_URL_RE.search(line)
+    return m.group(0) if m and not m.group(0).startswith("https://api.") else None
+
+
+def start_tunnel(port: int, tls: bool, timeout: float = 40.0):
+    """Start cloudflared and return (process, public_url). Raises RuntimeError on failure."""
+    proc = subprocess.Popen(tunnel_command(port, tls), stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    found: list[str] = []
+    deadline = time.monotonic() + timeout
+
+    def pump():
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            url = parse_tunnel_url(line)
+            if url and not found:
+                found.append(url)
+            if "ERR" in line and "failed" in line.lower():
+                sys.stderr.write("cloudflared: " + line)
+
+    threading.Thread(target=pump, daemon=True).start()
+    while not found and proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.2)
+    if not found:
+        proc.kill()
+        raise RuntimeError("cloudflared did not report a public URL (is the network up?)")
+    return proc, found[0]
 
 
 def voice_for(lang: str):
@@ -109,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ----------------------------------------------------------
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        if path.startswith("/api/") and not is_authorized(self.headers, self.path):
+            return self._json(401, {"error": "access key required"})
         if path in ("/", "/index.html"):
             with open(INDEX, "rb") as f:
                 data = f.read()
@@ -148,6 +213,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path != "/api/translate":
             return self._json(404, {"error": "not found"})
+        if not is_authorized(self.headers, self.path):
+            return self._json(401, {"error": "access key required"})
         try:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -245,7 +312,14 @@ def main(argv=None) -> int:
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--lan", action="store_true",
                     help="bind all interfaces and serve HTTPS (self-signed) for phones on the same Wi-Fi")
+    ap.add_argument("--public", action="store_true",
+                    help="open a Cloudflare quick tunnel and print a public https URL (needs `brew install cloudflared`)")
+    ap.add_argument("--key", default=os.environ.get("VT_ACCESS_KEY"),
+                    help="access key required for /api/* (auto-generated with --public)")
     args = ap.parse_args(argv)
+
+    global ACCESS_KEY
+    ACCESS_KEY = args.key or (generate_key() if args.public else None)
 
     Handler.backend = translator.get_backend(args.backend)
     ready, detail = Handler.backend.ready()
@@ -268,11 +342,25 @@ def main(argv=None) -> int:
     print(f"backend: {Handler.backend.name}  ready: {ready}  ({detail})", flush=True)
     if not ready:
         print("NOTE: backend not ready; requests will return an error until it is.", flush=True)
+    tunnel = None
+    if args.public:
+        try:
+            tunnel, url = start_tunnel(args.port, tls=args.lan)
+        except (OSError, RuntimeError) as e:
+            print(f"ERROR: could not open tunnel: {e}", flush=True)
+            httpd.server_close()
+            return 1
+        print(f"  anywhere (share this): {url}/?key={ACCESS_KEY}", flush=True)
+        print("  The key is required; the page remembers it after the first visit.", flush=True)
+    elif ACCESS_KEY:
+        print(f"  access key required for /api/*: open the page with ?key={ACCESS_KEY}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if tunnel is not None:
+            tunnel.terminate()
         httpd.server_close()
     return 0
 
