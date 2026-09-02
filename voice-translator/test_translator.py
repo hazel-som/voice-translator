@@ -165,7 +165,7 @@ class AgyBackendTest(unittest.TestCase):
         self.assertIn("--disable-slash-commands", cmd)
 
     def test_parse_success(self):
-        out = '{"conversation_id":"x","status":"SUCCESS","response":"Nasaan po ang banyo?\n","duration_seconds":1.4}'
+        out = '{"conversation_id":"x","status":"SUCCESS","response":"Nasaan po ang banyo?\\n","duration_seconds":1.4}'
         self.assertEqual(translator.parse_agy_output(out), ("done", "Nasaan po ang banyo?"))
 
     def test_parse_failure_status(self):

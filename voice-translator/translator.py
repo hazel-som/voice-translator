@@ -246,8 +246,11 @@ class AgyBackend:
     def ready(self) -> tuple[bool, str]:
         if not os.path.exists(self.agy_bin):
             return False, f"agy not found at {self.agy_bin}"
-        creds = os.path.expanduser("~/.gemini/antigravity-cli/oauth_creds.json")
-        if not os.path.exists(creds):
+        creds = [os.path.expanduser(p) for p in (
+            "~/.gemini/antigravity-cli/antigravity-oauth-token",  # agy 1.1.x login
+            "~/.gemini/oauth_creds.json",                          # gemini-cli login (agy can reuse it)
+        )]
+        if not any(os.path.exists(c) for c in creds):
             return False, "Antigravity CLI is not logged in: run `agy` once and sign in"
         return True, f"antigravity login, model {self.model}"
 
