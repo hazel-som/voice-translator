@@ -2,7 +2,7 @@
 
 - 작성일: 2026-09-02
 - 상태: 사용자 채팅 승인(STT=브라우저 Web Speech API, 언어=한국어 ↔ 타갈로그어) 후 구현
-- 위치: `voice-translator/` (본 워크트리)
+- 위치: 저장소 루트 (2026-09-05까지는 `voice-translator/` 하위였음)
 
 ## 1. 목표
 
@@ -27,7 +27,7 @@
 ## 3. 아키텍처
 
 ```
-voice-translator/
+. (저장소 루트)
 ├── server.py        표준 라이브러리만 사용. ThreadingHTTPServer, 127.0.0.1:8787
 │                    GET  /              → index.html
 │                    GET  /api/health    → {backend, ready, detail}
@@ -46,7 +46,7 @@ voice-translator/
 
 ## 4. 테스트
 
-- 단위: `python3 -m unittest voice-translator/test_translator.py` — echo provider에서 캡처한 실제 JSONL 픽스처로 파싱 검증.
+- 단위: `python3 -m unittest test_translator.py` — echo provider에서 캡처한 실제 JSONL 픽스처로 파싱 검증.
 - 통합: `--backend echo` 로 서버 띄우고 curl → NDJSON 스트림 확인. `--backend ollama` 로 실제 ko→tl 번역 확인.
 - muse 실경로: 사용자 `muse login` 후 지연 측정 및 결과 확인.
 

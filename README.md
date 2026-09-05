@@ -7,7 +7,7 @@
 
 ```bash
 # 서버 시작 (의존성 설치 없음, 표준 라이브러리만 사용)
-python3 voice-translator/server.py --lan
+python3 server.py --lan
 ```
 
 시작하면 이런 주소가 출력됩니다. 같은 Wi-Fi의 핸드폰에서 첫 번째 주소를 엽니다.
@@ -24,7 +24,7 @@ python3 voice-translator/server.py --lan
 
 ```bash
 brew install cloudflared          # 최초 1회
-python3 voice-translator/server.py --lan --public
+python3 server.py --lan --public
 ```
 
 Cloudflare 임시 터널이 열리고 이런 줄이 출력됩니다. 이 주소를 핸드폰에 보내 열면 됩니다 (정식 인증서라 경고 없음).
@@ -72,7 +72,7 @@ muse는 이를 최대 10회 지수 백오프로 재시도하므로, 이 앱은 4
 ## 테스트
 
 ```bash
-python3 -m unittest discover -s voice-translator -p 'test_*.py'
+python3 -m unittest discover -p 'test_*.py'
 ```
 
 ## 구조
