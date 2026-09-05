@@ -2,103 +2,205 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>음성 번역기</title>
 <style>
+  /* Tokens follow the iOS system palette so the page feels native on the phone it runs on. */
   :root {
-    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c1f24; --muted: #6b7280; --line: #e5e7eb;
-    --accent: #2563eb; --accent-ink: #ffffff; --ok: #16a34a; --bad: #dc2626; --warn: #d97706;
-    --rec: #dc2626; --src-bg: #f3f4f6; --dst-bg: #eef4ff;
+    color-scheme: light dark;
+    --bg: #f2f2f7; --panel: #ffffff; --ink: #1c1c1e; --muted: #6e6e73; --line: rgba(60,60,67,.18);
+    --accent: #007aff; --ok: #34c759; --bad: #ff3b30; --warn: #ff9500; --rec: #ff3b30;
+    --a-tint: #ffffff; --b-tint: #e3efff;
+    --glass: rgba(242,242,247,.78); --glass-edge: rgba(255,255,255,.55);
+    --fill: rgba(120,120,128,.16);
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.07);
+    --sheet-shadow: 0 -8px 40px rgba(0,0,0,.18);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0f1216; --panel: #171b21; --ink: #e6e8eb; --muted: #9aa3ad; --line: #2a3038;
-      --accent: #3b82f6; --src-bg: #1f242b; --dst-bg: #1a2436;
+      --bg: #000000; --panel: #1c1c1e; --ink: #f2f2f7; --muted: #98989d; --line: rgba(84,84,88,.55);
+      --accent: #0a84ff; --ok: #30d158; --bad: #ff453a; --warn: #ff9f0a; --rec: #ff453a;
+      --a-tint: #1c1c1e; --b-tint: #0f2542;
+      --glass: rgba(20,20,22,.74); --glass-edge: rgba(255,255,255,.08);
+      --fill: rgba(120,120,128,.28);
+      --shadow: 0 1px 2px rgba(0,0,0,.5), 0 6px 20px rgba(0,0,0,.45);
+      --sheet-shadow: 0 -8px 40px rgba(0,0,0,.6);
     }
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-           padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
-  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .pill.ok { color: var(--ok); border-color: var(--ok); }
-  .pill.bad { color: var(--bad); border-color: var(--bad); }
-  main { max-width: 860px; margin: 0 auto; padding: 18px 16px 140px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
-  select, button, input[type=text] { font: inherit; color: inherit; }
-  select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
-  .swap { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
-  .swap:hover { border-color: var(--accent); }
-  label.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; margin-left: auto; }
-  #log { display: flex; flex-direction: column; gap: 10px; }
-  .row { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .row .src { padding: 10px 14px; background: var(--src-bg); font-size: 14px; color: var(--muted); display: flex; gap: 8px; }
-  .row .src .lang { font-weight: 600; color: var(--ink); flex: none; }
-  .row .dst { padding: 12px 14px; background: var(--dst-bg); font-size: 18px; line-height: 1.5; display: flex; gap: 10px; align-items: flex-start; }
-  .row .dst .text { flex: 1; white-space: pre-wrap; word-break: break-word; }
-  .row .dst .text.pending::after { content: "…"; animation: blink 1s steps(2) infinite; color: var(--muted); }
-  .row .dst .text.error { color: var(--bad); font-size: 14px; }
-  .row .dst .text.error a { color: inherit; }
-  .row .status { font-size: 12px; color: var(--muted); padding: 0 14px 8px; background: var(--dst-bg); }
-  .row .status:empty { display: none; }
-  .row .meta { flex: none; display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
-  .row button.say { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; cursor: pointer; }
-  .row button.say:disabled { opacity: .4; cursor: default; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
-  footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
-  .bar { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
-  #mic { flex: none; width: 64px; height: 64px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-ink);
-         font-size: 26px; cursor: pointer; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-  #mic.on { background: var(--rec); animation: pulse 1.4s ease-in-out infinite; }
-  #mic:disabled { background: var(--muted); cursor: not-allowed; animation: none; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,.45);} 50% { box-shadow: 0 0 0 14px rgba(220,38,38,0);} }
-  .typing { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  #interim { min-height: 20px; color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #interim.live { color: var(--ink); }
-  form { display: flex; gap: 8px; }
-  input[type=text] { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); min-width: 0; }
-  form button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
-  .notice { font-size: 13px; color: var(--warn); margin-bottom: 10px; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { height: 100%; }
+  body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); overflow-x: hidden;
+         font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+
+  /* ---- floating chrome: translucent layers, content scrolls underneath ---- */
+  .glass { background: var(--glass); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); }
+  header { position: fixed; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
+           padding: calc(10px + env(safe-area-inset-top)) 12px 10px 18px; border-bottom: 1px solid var(--line); }
+  header h1 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: 0.01em; }
+  .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+  .status.ok::before { background: var(--ok); }
+  .status.bad { color: var(--bad); } .status.bad::before { background: var(--bad); }
+  .icon-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: transparent; font-size: 21px; line-height: 1;
+              display: grid; place-items: center; cursor: pointer; transition: transform 100ms ease-out, background-color 100ms ease-out; }
+  .icon-btn:active { transform: scale(.9); background: var(--fill); }
+
+  main { max-width: 720px; margin: 0 auto; padding: calc(66px + env(safe-area-inset-top)) 14px calc(214px + env(safe-area-inset-bottom)); }
+  .notice { font-size: 14px; color: var(--warn); margin: 0 4px 12px; line-height: 1.4; }
   .notice:empty { display: none; }
+
+  /* ---- transcript: the translation is the biggest thing on screen ---- */
+  #log { display: flex; flex-direction: column; gap: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 56px 12px; font-size: 15px; line-height: 1.6; }
+  .empty p { margin: 0 0 10px; }
+  .row { position: relative; max-width: 88%; align-self: flex-start; background: var(--a-tint); border-radius: 20px; padding: 12px 16px 10px;
+         box-shadow: var(--shadow); cursor: pointer; animation: rise 320ms cubic-bezier(.2,.8,.2,1) both;
+         transition: transform 100ms ease-out; user-select: none; -webkit-user-select: none; }
+  .row:active { transform: scale(.98); }
+  .row.b { align-self: flex-end; background: var(--b-tint); }
+  .row .src { font-size: 14px; color: var(--muted); line-height: 1.4; display: flex; gap: 6px; }
+  .row .src .flag { flex: none; }
+  .row .src .t { white-space: pre-wrap; word-break: break-word; }
+  .row .dst { margin-top: 6px; font-size: 22px; line-height: 1.3; letter-spacing: -0.01em; font-weight: 500;
+              white-space: pre-wrap; word-break: break-word; }
+  .row .dst.pending:empty { min-height: 1.3em; }
+  .row .dst.pending::after { content: "…"; animation: blink 1s steps(2) infinite; color: var(--muted); }
+  .row .dst.error { color: var(--bad); font-size: 15px; font-weight: 400; }
+  .row .dst.error a { color: inherit; }
+  .row .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 18px; margin-top: 4px;
+               font-size: 12px; color: var(--muted); }
+  .row .foot .replay { margin-left: auto; opacity: 0; transition: opacity 200ms ease; }
+  .row.done .foot .replay { opacity: .8; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---- bottom bar: who is speaking? press your own language ---- */
+  footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 8px 14px calc(12px + env(safe-area-inset-bottom));
+           border-top: 1px solid var(--glass-edge); }
+  .bar { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  #interim { min-height: 22px; font-size: 15px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+  #interim.live { color: var(--ink); }
+  .talk { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .talk button { min-height: 76px; border: none; border-radius: 22px; background: var(--panel); box-shadow: var(--shadow); cursor: pointer;
+                 display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 8px 10px;
+                 transition: transform 100ms ease-out, background-color 160ms ease-out, color 160ms ease-out; }
+  .talk button .name { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
+  .talk button .hint { font-size: 12px; color: var(--muted); letter-spacing: 0.01em; line-height: 1.2; }
+  .talk button:active { transform: scale(.97); }
+  .talk button.on { background: var(--rec); color: #fff; animation: pulse 1.4s ease-in-out infinite; }
+  .talk button.on .hint { color: rgba(255,255,255,.88); }
+  .talk button:disabled { opacity: .45; cursor: not-allowed; animation: none; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,59,48,.45); } 50% { box-shadow: 0 0 0 12px rgba(255,59,48,0); } }
+  form { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line);
+                     background: var(--panel); color: var(--ink); }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  form button { width: 46px; flex: none; border: none; border-radius: 14px; background: var(--accent); color: #fff; font-size: 20px; cursor: pointer;
+                transition: transform 100ms ease-out; }
+  form button:active { transform: scale(.94); }
+
+  /* ---- settings sheet: enters from the bottom, leaves the same way, can be dragged down ---- */
+  #scrim { position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,.32); opacity: 0; }
+  #scrim[hidden], #sheet[hidden] { display: none; }
+  #sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; max-width: 720px; margin: 0 auto; border-radius: 22px 22px 0 0;
+           padding: 6px 18px calc(28px + env(safe-area-inset-bottom)); box-shadow: var(--sheet-shadow); transform: translateY(100%);
+           touch-action: none; will-change: transform; -webkit-backdrop-filter: blur(28px) saturate(180%); backdrop-filter: blur(28px) saturate(180%); }
+  .grip { width: 36px; height: 5px; border-radius: 3px; background: rgba(120,120,128,.45); margin: 6px auto 12px; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+  .sheet-head h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+  .close { border: none; background: none; color: var(--accent); font-weight: 600; font-size: 17px; cursor: pointer; padding: 8px 4px;
+          transition: transform 100ms ease-out; }
+  .close:active { transform: scale(.94); }
+  .group { background: var(--panel); border-radius: 14px; overflow: hidden; margin-bottom: 12px; }
+  .cell { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 16px; min-height: 50px; }
+  .cell + .cell { border-top: 1px solid var(--line); }
+  .cell .label { font-size: 16px; }
+  .cell .label small { display: block; font-size: 12px; color: var(--muted); }
+  .cell select { font: inherit; font-size: 16px; color: var(--accent); border: none; background: transparent; padding: 6px 0; max-width: 55%; cursor: pointer; }
+  .switch { appearance: none; -webkit-appearance: none; width: 51px; height: 31px; border-radius: 16px; background: rgba(120,120,128,.32);
+            position: relative; margin: 0; cursor: pointer; transition: background-color 200ms ease; flex: none; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff;
+                   box-shadow: 0 3px 8px rgba(0,0,0,.18); transition: transform 220ms cubic-bezier(.2,.8,.2,1); }
+  .switch:checked { background: var(--ok); }
+  .switch:checked::after { transform: translateX(20px); }
+  .info { font-size: 13px; color: var(--muted); margin: 0 4px; line-height: 1.5; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .row { animation: fadein 200ms ease both; }
+    .talk button.on { animation: none; box-shadow: 0 0 0 4px rgba(255,59,48,.35); }
+    .row .dst.pending::after { animation: none; }
+    @keyframes fadein { from { opacity: 0; } }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .glass, #sheet { background: var(--panel); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  @media (prefers-contrast: more) {
+    .glass, #sheet { background: var(--panel); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    header, footer { border-color: var(--ink); }
+    .row { border: 1px solid var(--ink); }
+  }
 </style>
 </head>
 <body>
-<header>
+<header class="glass">
   <h1>음성 번역기</h1>
-  <span id="status" class="pill">연결 중…</span>
+  <span id="status" class="status">연결 중</span>
+  <button id="settings" class="icon-btn" aria-label="설정" title="언어 설정">⚙︎</button>
 </header>
 <main>
-  <div class="controls">
-    <select id="source" aria-label="말하는 언어"></select>
-    <button class="swap" id="swap" title="방향 바꾸기">⇄</button>
-    <select id="target" aria-label="번역할 언어"></select>
-    <label class="chk"><input type="checkbox" id="autosay"> 번역 자동 읽어주기</label>
-  </div>
   <div id="notice" class="notice"></div>
-  <div id="log"><div class="empty">아래 마이크 버튼을 누르고 말하세요. 문장이 끝나면 바로 번역됩니다.</div></div>
+  <div id="log"><div class="empty" id="empty"></div></div>
 </main>
-<footer>
+<footer class="glass">
   <div class="bar">
-    <button id="mic" title="말하기 / Magsalita">🎤</button>
-    <div class="typing">
-      <div id="interim"></div>
-      <form id="typeform">
-        <input type="text" id="typed" placeholder="또는 여기에 입력하고 Enter" autocomplete="off">
-        <button type="submit">번역</button>
-      </form>
+    <div id="interim"></div>
+    <div class="talk">
+      <button id="btnA" data-side="A"><span class="name"></span><span class="hint"></span></button>
+      <button id="btnB" data-side="B"><span class="name"></span><span class="hint"></span></button>
     </div>
+    <form id="typeform">
+      <input type="text" id="typed" autocomplete="off" enterkeyhint="send">
+      <button type="submit" aria-label="번역">↑</button>
+    </form>
   </div>
 </footer>
+
+<div id="scrim" hidden></div>
+<section id="sheet" class="glass" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <div class="grip"></div>
+  <div class="sheet-head">
+    <h2 id="sheet-title">설정</h2>
+    <button class="close" id="sheet-done">완료</button>
+  </div>
+  <div class="group">
+    <div class="cell"><span class="label">내 언어 <small>왼쪽 버튼</small></span><select id="langA" aria-label="내 언어"></select></div>
+    <div class="cell"><span class="label">상대 언어 <small>오른쪽 버튼</small></span><select id="langB" aria-label="상대 언어"></select></div>
+  </div>
+  <div class="group">
+    <div class="cell"><label class="label" for="autosay">번역 자동 읽어주기</label><input type="checkbox" class="switch" id="autosay" checked></div>
+  </div>
+  <p class="info" id="engine"></p>
+  <p class="info">언어 버튼을 누르면 그 언어로 듣고, 다른 언어로 번역해 읽어 줍니다. 아래 입력창은 마지막에 누른 버튼의 방향을 따릅니다.</p>
+</section>
+
 <script>
 (() => {
   const NAMES = { ko:"한국어", tl:"Tagalog", en:"English", ja:"日本語", zh:"中文", vi:"Tiếng Việt",
                   id:"Bahasa Indonesia", th:"ไทย", ne:"नेपाली", bn:"বাংলা", ur:"اردو", km:"ខ្មែរ" };
   const BCP47 = { ko:"ko-KR", tl:"fil-PH", en:"en-US", ja:"ja-JP", zh:"zh-CN", vi:"vi-VN", id:"id-ID",
                   th:"th-TH", ne:"ne-NP", bn:"bn-BD", ur:"ur-PK", km:"km-KH" };
+  const FLAG = { ko:"🇰🇷", tl:"🇵🇭", en:"🇺🇸", ja:"🇯🇵", zh:"🇨🇳", vi:"🇻🇳", id:"🇮🇩", th:"🇹🇭", ne:"🇳🇵", bn:"🇧🇩", ur:"🇵🇰", km:"🇰🇭" };
+  // Each button speaks to its own user in their own language.
+  const PRESS = { ko:"눌러서 말하기", tl:"Pindutin at magsalita", en:"Tap to speak", ja:"押して話す", zh:"按住说话", vi:"Nhấn để nói",
+                  id:"Tekan untuk bicara", th:"แตะแล้วพูด", ne:"थिचेर बोल्नुहोस्", bn:"চেপে বলুন", ur:"دبائیں اور بولیں", km:"ចុចហើយនិយាយ" };
+  const HEARING = { ko:"듣는 중 · 다시 누르면 멈춤", tl:"Nakikinig · pindutin para tumigil", en:"Listening · tap to stop", ja:"聞いています · 押すと停止",
+                    zh:"正在听 · 再按停止", vi:"Đang nghe · nhấn để dừng", id:"Mendengarkan · tekan untuk berhenti", th:"กำลังฟัง · แตะเพื่อหยุด",
+                    ne:"सुन्दैछु · रोक्न थिच्नुहोस्", bn:"শুনছি · থামাতে চাপুন", ur:"سن رہا ہوں · روکنے کے لیے دبائیں", km:"កំពុងស្តាប់ · ចុចដើម្បីឈប់" };
   const VOICE_PREFIX = { tl:["fil","tl"] };   // speechSynthesis voice lang prefixes that differ from our code
+  const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const $ = (id) => document.getElementById(id);
 
@@ -111,60 +213,88 @@
     accessKey = localStorage.getItem("vt.key") || "";
   } catch (e) {}
   const apiHeaders = (extra) => Object.assign(accessKey ? { "X-Access-Key": accessKey } : {}, extra || {});
-  const srcSel = $("source"), dstSel = $("target"), log = $("log"), mic = $("mic"),
-        interim = $("interim"), status = $("status"), notice = $("notice"), autosay = $("autosay");
 
-  for (const sel of [srcSel, dstSel]) {
+  const log = $("log"), interim = $("interim"), status = $("status"), notice = $("notice"), autosay = $("autosay"),
+        langA = $("langA"), langB = $("langB"), btnA = $("btnA"), btnB = $("btnB"), typed = $("typed"), empty = $("empty");
+
+  for (const sel of [langA, langB]) {
     for (const [code, name] of Object.entries(NAMES)) {
-      const o = document.createElement("option"); o.value = code; o.textContent = name; sel.appendChild(o);
+      const o = document.createElement("option"); o.value = code; o.textContent = `${FLAG[code]} ${name}`; sel.appendChild(o);
     }
   }
-  // Always start as "I speak Korean -> Tagalog" with auto-read on; the selectors and the
-  // checkbox still work for the rest of the session, they are just not remembered.
-  srcSel.value = "ko"; dstSel.value = "tl"; autosay.checked = true;
-  const persist = () => {};
+  // Always open as "I speak Korean, they speak Tagalog" with auto-read on. The settings sheet
+  // changes both for the rest of the session; nothing is remembered on purpose.
+  langA.value = "ko"; langB.value = "tl"; autosay.checked = true;
 
-  // ---- backend status -------------------------------------------------
-  let backendName = "";
+  // ---- who is talking ----------------------------------------------------
+  // `side` is the button pressed last: it decides the direction of speech and of typed text.
+  let side = "A";
+  let listening = null;                      // "A" | "B" | null
+  const codeOf = (s) => (s === "A" ? langA.value : langB.value);
+  const srcCode = () => codeOf(side), dstCode = () => codeOf(side === "A" ? "B" : "A");
+
+  function renderButtons() {
+    for (const [btn, s] of [[btnA, "A"], [btnB, "B"]]) {
+      const code = codeOf(s), on = listening === s;
+      btn.querySelector(".name").textContent = `${FLAG[code]} ${NAMES[code]}`;
+      const hint = btn.querySelector(".hint");
+      hint.textContent = on ? HEARING[code] : PRESS[code];
+      hint.lang = BCP47[code];
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    typed.placeholder = `${NAMES[srcCode()]} → ${NAMES[dstCode()]} 입력`;
+    const a = langA.value, b = langB.value;
+    empty.innerHTML = "";
+    const p1 = document.createElement("p"); p1.textContent = `${FLAG[a]} ${NAMES[a]} 버튼을 누르고 말하세요. 문장이 끝나면 바로 번역해서 읽어 줍니다.`;
+    const p2 = document.createElement("p"); p2.textContent = `${FLAG[b]} ${PRESS[b]}`; p2.lang = BCP47[b];
+    empty.append(p1, p2);
+  }
+  renderButtons();
+
+  // ---- backend status ------------------------------------------------------
+  let serverTts = [];
   async function checkHealth() {
     try {
       const r = await fetch("/api/health", { headers: apiHeaders() });
-      if (r.status === 401) { status.textContent = "접속 키 필요"; status.className = "pill bad";
-        notice.textContent = "접속 키가 없거나 틀립니다. 서버가 출력한 ?key= 가 붙은 주소로 다시 열어 주세요."; return; }
+      if (r.status === 401) {
+        status.textContent = "접속 키 필요"; status.className = "status bad";
+        notice.textContent = "접속 키가 없거나 틀립니다. 서버가 출력한 ?key= 가 붙은 주소로 다시 열어 주세요."; return;
+      }
       const h = await r.json();
-      backendName = h.backend; serverTts = h.tts || [];
-      status.textContent = `${h.backend} · ${h.ready ? "준비됨" : "준비 안 됨"}`;
-      status.className = "pill " + (h.ready ? "ok" : "bad");
-      status.title = h.detail;
-      notice.textContent = h.ready ? "" : `번역 백엔드가 준비되지 않았습니다: ${h.detail}`;
+      serverTts = h.tts || [];
+      status.textContent = h.ready ? "준비됨" : "준비 중";
+      status.className = "status " + (h.ready ? "ok" : "bad");
+      status.title = `${h.backend} · ${h.detail}`;
+      $("engine").textContent = `번역 엔진: ${h.backend} · ${h.detail}`;
+      notice.textContent = h.ready ? "" : `번역 엔진이 아직 준비되지 않았습니다: ${h.detail}`;
     } catch (e) {
-      status.textContent = "서버 연결 실패"; status.className = "pill bad";
+      status.textContent = "서버 연결 안 됨"; status.className = "status bad";
     }
   }
   checkHealth(); setInterval(checkHealth, 15000);
 
-  // ---- transcript rows -------------------------------------------------
-  function addRow(text, source, target) {
-    const empty = log.querySelector(".empty"); if (empty) empty.remove();
-    const row = document.createElement("div"); row.className = "row";
-    row.innerHTML = `<div class="src"><span class="lang"></span><span class="t"></span></div>
-      <div class="dst"><div class="text pending"></div>
-        <div class="meta"><span class="ms"></span><button class="say" title="읽어주기">🔊</button></div></div>
-      <div class="status"></div>`;
-    row.querySelector(".lang").textContent = NAMES[source];
+  // ---- transcript ----------------------------------------------------------
+  const scrollToEnd = () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduceMotion() ? "auto" : "smooth" });
+  function addRow(text, source, target, rowSide) {
+    if (empty.parentNode) empty.remove();
+    const row = document.createElement("div"); row.className = "row " + (rowSide === "B" ? "b" : "a");
+    row.innerHTML = `<div class="src"><span class="flag"></span><span class="t"></span></div>
+      <div class="dst pending"></div>
+      <div class="foot"><span class="state"></span><span class="replay" aria-hidden="true">🔊</span></div>`;
+    row.querySelector(".flag").textContent = FLAG[source];
     row.querySelector(".t").textContent = text;
-    const say = row.querySelector(".say");
-    say.disabled = true;
-    say.addEventListener("click", () => speak(row.querySelector(".dst .text").textContent, target));
+    row.title = "누르면 다시 읽어 줍니다";
+    row.addEventListener("click", () => { if (row.classList.contains("done")) speak(row.querySelector(".dst").textContent, target); });
     log.appendChild(row);
-    row.scrollIntoView({ block: "end", behavior: "smooth" });
+    scrollToEnd();
     return row;
   }
 
-  async function translate(text, source, target) {
-    const row = addRow(text, source, target);
-    const out = row.querySelector(".dst .text"), ms = row.querySelector(".ms"), say = row.querySelector(".say"),
-          statusEl = row.querySelector(".status");
+  async function translate(text, source, target, rowSide) {
+    if (source === target) { notice.textContent = "두 버튼의 언어가 같습니다. 설정에서 바꿔 주세요."; return; }
+    const row = addRow(text, source, target, rowSide);
+    const out = row.querySelector(".dst"), state = row.querySelector(".state");
     let acc = "";
     try {
       const r = await fetch("/api/translate", { method: "POST", headers: apiHeaders({ "Content-Type": "application/json" }),
@@ -180,12 +310,12 @@
           const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
           if (!line.trim()) continue;
           const ev = JSON.parse(line);
-          if (ev.status) statusEl.textContent = ev.status;
-          if (ev.delta) { acc += ev.delta; out.textContent = acc; statusEl.textContent = ""; }
+          if (ev.status) state.textContent = ev.status;
+          if (ev.delta) { acc += ev.delta; out.textContent = acc; state.textContent = ""; scrollToEnd(); }
           if (ev.done) {
-            out.textContent = ev.text; out.classList.remove("pending"); statusEl.textContent = "";
-            ms.textContent = (ev.ms / 1000).toFixed(1) + "s";
-            say.disabled = !hasVoice(target);
+            out.textContent = ev.text; out.classList.remove("pending"); state.textContent = "";
+            row.classList.add("done"); row.title = `${(ev.ms / 1000).toFixed(1)}초 · 누르면 다시 읽어 줍니다`;
+            scrollToEnd();
             if (autosay.checked && hasVoice(target)) speak(ev.text, target);
           }
           if (ev.error) throw new Error(ev.error);
@@ -193,8 +323,8 @@
       }
       if (out.classList.contains("pending")) throw new Error("응답이 끝나지 않았습니다");
     } catch (e) {
-      statusEl.textContent = "";
-      out.className = "text error"; out.textContent = "오류: ";
+      state.textContent = "";
+      out.className = "dst error"; out.textContent = "오류: ";
       // Turn a bare https URL in the message into a link (error text is from our own server).
       const m = /^(.*?)(https:\/\/\S+)(.*)$/.exec(e.message);
       if (m) { out.append(m[1]); const a = document.createElement("a"); a.href = m[2]; a.target = "_blank"; a.textContent = m[2]; out.append(a, m[3]); }
@@ -202,10 +332,9 @@
     }
   }
 
-  // ---- speech output ---------------------------------------------------
+  // ---- speech output ---------------------------------------------------------
   // Translations are read by the server's TTS (/api/tts, Edge neural voices, has Tagalog).
   // The browser's own voices are only a fallback when the server cannot synthesize.
-  let serverTts = [];
   let voices = [];
   const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; };
   loadVoices(); if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
@@ -215,7 +344,7 @@
   }
   const hasVoice = (code) => serverTts.includes(code) || !!findVoice(code);
 
-  // One <audio> element, "unlocked" by the first tap on the mic button so phones let us play
+  // One <audio> element, "unlocked" by the first tap on a language button so phones let us play
   // later translations without another gesture.
   const player = new Audio();
   player.preload = "auto";
@@ -236,9 +365,9 @@
     speakQueue = speakQueue.then(() => speakNow(text, code)).catch(() => {});
   }
   function pauseMic() {
-    const wasListening = listening;
-    if (wasListening) { suspendRecognition = true; try { recognition.stop(); } catch (e) {} }
-    return () => { if (wasListening && listening) { suspendRecognition = false; safeStart(); } };
+    const was = listening;
+    if (was) { suspendRecognition = true; try { recognition.stop(); } catch (e) {} }
+    return () => { if (was && listening) { suspendRecognition = false; safeStart(); } };
   }
   async function speakNow(text, code) {
     const resume = pauseMic();   // do not transcribe our own speaker output
@@ -250,7 +379,7 @@
           await new Promise((res) => {
             player.onended = player.onerror = () => { URL.revokeObjectURL(url); res(); };
             player.src = url;
-            player.play().catch(() => { notice.textContent = "소리 재생이 차단되었습니다. 마이크 버튼을 한 번 눌러 주세요."; res(); });
+            player.play().catch(() => { notice.textContent = "소리 재생이 차단되었습니다. 언어 버튼을 한 번 눌러 주세요."; res(); });
           });
           return;
         }
@@ -267,12 +396,12 @@
     }
   }
 
-  // ---- speech recognition ----------------------------------------------
+  // ---- speech recognition ------------------------------------------------------
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognition = null, listening = false, suspendRecognition = false;
+  let recognition = null, suspendRecognition = false;
   if (!SR) {
-    mic.disabled = true; mic.title = "이 브라우저는 음성 인식을 지원하지 않습니다";
-    notice.textContent = "이 브라우저는 Web Speech API를 지원하지 않습니다. Chrome 또는 Safari를 사용하세요. 타이핑 입력은 사용할 수 있습니다.";
+    btnA.disabled = btnB.disabled = true;
+    notice.textContent = "이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 또는 Safari를 사용하세요. 아래 입력창은 쓸 수 있습니다.";
   } else {
     recognition = new SR();
     recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 1;
@@ -281,14 +410,14 @@
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const res = ev.results[i]; const t = res[0].transcript.trim();
         if (!t) continue;
-        if (res.isFinal) translate(t, srcSel.value, dstSel.value); else interimText += t + " ";
+        if (res.isFinal) translate(t, srcCode(), dstCode(), side); else interimText += t + " ";
       }
       interim.textContent = interimText; interim.className = interimText ? "live" : "";
     };
     recognition.onerror = (ev) => {
       if (ev.error === "no-speech" || ev.error === "aborted") return;
       notice.textContent = "음성 인식 오류: " + ev.error + (ev.error === "not-allowed" ? " (마이크 권한을 허용하세요)" : "");
-      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") setListening(false);
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") setListening(null);
     };
     recognition.onend = () => {
       interim.textContent = ""; interim.className = "";
@@ -298,35 +427,108 @@
   }
   function safeStart() {
     if (!recognition || !listening) return;
-    recognition.lang = BCP47[srcSel.value];
+    recognition.lang = BCP47[srcCode()];
     try { recognition.start(); } catch (e) { /* already started */ }
   }
-  function setListening(on) {
-    listening = on; mic.classList.toggle("on", on); mic.textContent = on ? "■" : "🎤";
-    if (on) { notice.textContent = ""; safeStart(); }
-    else { suspendRecognition = false; try { recognition && recognition.stop(); } catch (e) {} interim.textContent = ""; }
+  function restartRecognition() {
+    suspendRecognition = true; try { recognition.stop(); } catch (e) {}
+    setTimeout(() => { suspendRecognition = false; safeStart(); }, 200);
   }
-  mic.addEventListener("click", () => { unlockAudio(); setListening(!listening); });
-
-  // Changing languages restarts recognition with the new language.
-  function onLangChange() {
-    persist();
-    if (srcSel.value === dstSel.value) { notice.textContent = "말하는 언어와 번역할 언어가 같습니다."; return; }
+  // Pressing a language button listens in that language; the same button again stops; the other
+  // button switches speakers without a stop in between.
+  function setListening(s) {
+    if (!recognition) return;
+    if (s && s === listening) s = null;
+    if (s) side = s;
+    const was = listening; listening = s;
+    renderButtons();
+    if (!s) { suspendRecognition = false; try { recognition.stop(); } catch (e) {} interim.textContent = ""; interim.className = ""; return; }
     notice.textContent = "";
-    if (listening) { suspendRecognition = true; recognition.stop(); setTimeout(() => { suspendRecognition = false; safeStart(); }, 200); }
+    if (was) restartRecognition(); else safeStart();
   }
-  srcSel.addEventListener("change", onLangChange);
-  dstSel.addEventListener("change", onLangChange);
-  $("swap").addEventListener("click", () => { const s = srcSel.value; srcSel.value = dstSel.value; dstSel.value = s; onLangChange(); });
+  for (const btn of [btnA, btnB]) btn.addEventListener("click", () => { unlockAudio(); setListening(btn.dataset.side); });
 
-  // ---- typed input -----------------------------------------------------
+  function onLangChange() {
+    notice.textContent = langA.value === langB.value ? "두 버튼의 언어가 같습니다." : "";
+    renderButtons();
+    if (listening) restartRecognition();
+  }
+  langA.addEventListener("change", onLangChange);
+  langB.addEventListener("change", onLangChange);
+
+  // ---- typed input -------------------------------------------------------------
   $("typeform").addEventListener("submit", (ev) => {
     ev.preventDefault();
-    const t = $("typed").value.trim(); if (!t) return;
-    $("typed").value = "";
+    const t = typed.value.trim(); if (!t) return;
+    typed.value = "";
     unlockAudio();
-    translate(t, srcSel.value, dstSel.value);
+    translate(t, srcCode(), dstCode(), side);
   });
+
+  // ---- settings sheet ----------------------------------------------------------
+  // A bottom sheet driven by a critically damped spring: it always animates from where it is
+  // right now, so a tap or drag mid-flight redirects it instead of waiting for it to finish.
+  const sheet = $("sheet"), scrim = $("scrim");
+  let sheetY = 0, sheetH = 0, sheetOpen = false, anim = null;
+  function sheetSet(y) { sheetY = y; sheet.style.transform = `translateY(${y}px)`; scrim.style.opacity = String(Math.max(0, Math.min(1, 1 - y / (sheetH || 1)))); }
+  function stopAnim() { if (anim) { cancelAnimationFrame(anim.raf); anim = null; } }
+  function springTo(target, v0, onDone) {              // damping 1.0, response 0.35s
+    stopAnim();
+    const w = 2 * Math.PI / 0.35; let x = sheetY, v = v0 || 0, last = performance.now();
+    const step = (now) => {
+      const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000)); last = now;
+      v += (-2 * w * v - w * w * (x - target)) * dt; x += v * dt;
+      if (Math.abs(x - target) < 0.5 && Math.abs(v) < 10) { sheetSet(target); anim = null; if (onDone) onDone(); return; }
+      sheetSet(x); anim.raf = requestAnimationFrame(step);
+    };
+    anim = { raf: requestAnimationFrame(step) };
+  }
+  function openSheet() {
+    const wasHidden = sheet.hidden;
+    scrim.hidden = false; sheet.hidden = false;
+    sheetH = sheet.offsetHeight; sheetOpen = true;
+    if (reduceMotion()) { sheetSet(0); return; }
+    if (wasHidden) sheetSet(sheetH);          // a fresh open starts below the screen; a re-open mid-close continues from where it is
+    springTo(0, 0);
+  }
+  function closeSheet(v0) {
+    if (!sheetOpen && !anim) return;
+    sheetOpen = false;
+    const finish = () => { if (!sheetOpen) { sheet.hidden = true; scrim.hidden = true; } };
+    if (reduceMotion()) { sheetSet(sheetH); finish(); return; }
+    springTo(sheetH, v0 || 0, finish);
+  }
+  $("settings").addEventListener("click", () => (sheetOpen ? closeSheet() : openSheet()));
+  $("sheet-done").addEventListener("click", () => closeSheet());
+  scrim.addEventListener("click", () => closeSheet());
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+
+  // Drag to dismiss: 1:1 tracking, rubber-band above the resting point, momentum decides the outcome.
+  const rubberband = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
+  let drag = null;
+  sheet.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("select, input, button")) return;
+    stopAnim();
+    sheet.setPointerCapture(e.pointerId);
+    drag = { id: e.pointerId, startY: e.clientY, startSheetY: sheetY, hist: [[performance.now(), sheetY]] };
+  });
+  sheet.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    let y = drag.startSheetY + (e.clientY - drag.startY);
+    if (y < 0) y = rubberband(y, sheetH);
+    sheetSet(y);
+    drag.hist.push([performance.now(), y]); if (drag.hist.length > 6) drag.hist.shift();
+  });
+  const endDrag = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const h = drag.hist, [t0, y0] = h[0], [t1, y1] = h[h.length - 1];
+    const v = t1 > t0 ? (y1 - y0) / ((t1 - t0) / 1000) : 0;               // px/s, down is positive
+    drag = null;
+    const projected = sheetY + (v / 1000) * 0.998 / (1 - 0.998);         // where a flick would come to rest
+    if (projected > sheetH * 0.5) closeSheet(Math.max(v, 0)); else springTo(0, v);
+  };
+  sheet.addEventListener("pointerup", endDrag);
+  sheet.addEventListener("pointercancel", endDrag);
 })();
 </script>
 </body>
