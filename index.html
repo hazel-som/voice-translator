@@ -507,7 +507,7 @@
   const rubberband = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
   let drag = null;
   sheet.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("select, input, button")) return;
+    if (e.target.closest(".group, select, input, button")) return;   // controls and their labels are not drag handles
     stopAnim();
     sheet.setPointerCapture(e.pointerId);
     drag = { id: e.pointerId, startY: e.clientY, startSheetY: sheetY, hist: [[performance.now(), sheetY]] };
