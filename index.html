@@ -204,6 +204,10 @@
 
   const $ = (id) => document.getElementById(id);
 
+  // Conversation log: one id per page load, so a refresh starts a new session in the server's DB.
+  const SESSION_ID = (crypto.randomUUID && crypto.randomUUID()) ||
+    Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
+
   // Access key: arrives once as ?key=... (public tunnel), then lives in localStorage.
   let accessKey = "";
   try {
@@ -298,7 +302,7 @@
     let acc = "";
     try {
       const r = await fetch("/api/translate", { method: "POST", headers: apiHeaders({ "Content-Type": "application/json" }),
-                                               body: JSON.stringify({ text, source, target }) });
+                                               body: JSON.stringify({ text, source, target, session: SESSION_ID }) });
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
       const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
       while (true) {

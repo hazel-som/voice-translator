@@ -112,3 +112,93 @@ class TunnelTest(unittest.TestCase):
         self.assertEqual(server.parse_tunnel_url(line), "https://quiet-owl-1234.trycloudflare.com")
         self.assertIsNone(server.parse_tunnel_url("INF Registered tunnel connection connIndex=0"))
         self.assertIsNone(server.parse_tunnel_url("https://api.trycloudflare.com/tunnel"))  # not a hostname URL
+
+
+class FakeBackend:
+    name = "fake"
+
+    def ready(self):
+        return True, "fake"
+
+    def translate(self, text, source, target):
+        yield "status", "working"
+        yield "delta", "Kumusta"
+        yield "done", "Kumusta"
+
+
+class FailingBackend(FakeBackend):
+    def translate(self, text, source, target):
+        yield "error", "boom"
+
+
+class ConversationLoggingTest(unittest.TestCase):
+    """POST /api/translate stores the finished sentence under the session the browser sent."""
+
+    def setUp(self):
+        import http.client
+        import json
+        import threading
+        from http.server import ThreadingHTTPServer
+        import storage
+        self.http, self.json = http.client, json
+        self.dir = tempfile.TemporaryDirectory()
+        self.store = storage.ConversationStore(os.path.join(self.dir.name, "conv.db"))
+        self.patches = [unittest.mock.patch.object(server.Handler, "backend", FakeBackend()),
+                        unittest.mock.patch.object(server.Handler, "store", self.store),
+                        unittest.mock.patch.object(server, "ACCESS_KEY", None)]
+        for p in self.patches:
+            p.start()
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        for p in self.patches:
+            p.stop()
+        self.store.close()
+        self.dir.cleanup()
+
+    def _post(self, body):
+        conn = self.http.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("POST", "/api/translate", body=self.json.dumps(body),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        data = resp.read().decode()
+        conn.close()
+        return resp.status, data
+
+    def _turns(self):
+        import sqlite3
+        with sqlite3.connect(self.store.path) as db:
+            return db.execute("SELECT session_id, source, target, source_text, translated_text FROM turns").fetchall()
+
+    def test_done_translation_is_saved_with_session(self):
+        status, body = self._post({"text": "안녕", "source": "ko", "target": "tl", "session": "page-load-0001"})
+        self.assertEqual(status, 200)
+        self.assertIn('"done": true', body)
+        self.assertEqual(self._turns(), [("page-load-0001", "ko", "tl", "안녕", "Kumusta")])
+
+    def test_missing_or_invalid_session_falls_back_to_unknown(self):
+        self._post({"text": "안녕", "source": "ko", "target": "tl"})
+        self._post({"text": "안녕", "source": "ko", "target": "tl", "session": "bad id!"})
+        self.assertEqual([t[0] for t in self._turns()], ["unknown", "unknown"])
+
+    def test_failed_translation_is_not_saved(self):
+        with unittest.mock.patch.object(server.Handler, "backend", FailingBackend()):
+            _, body = self._post({"text": "안녕", "source": "ko", "target": "tl", "session": "page-load-0001"})
+        self.assertIn('"error"', body)
+        self.assertEqual(self._turns(), [])
+
+    def test_storage_failure_does_not_break_the_response(self):
+        with unittest.mock.patch.object(self.store, "save_turn", side_effect=RuntimeError("disk full")):
+            status, body = self._post({"text": "안녕", "source": "ko", "target": "tl", "session": "page-load-0001"})
+        self.assertEqual(status, 200)
+        self.assertIn('"done": true', body)
+
+    def test_no_store_configured_still_translates(self):
+        with unittest.mock.patch.object(server.Handler, "store", None):
+            status, body = self._post({"text": "안녕", "source": "ko", "target": "tl", "session": "page-load-0001"})
+        self.assertEqual(status, 200)
+        self.assertIn('"done": true', body)

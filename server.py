@@ -15,6 +15,8 @@ GET  /api/tts?text=&lang= -> audio/mpeg (Microsoft Edge neural voices via `uvx e
                         falls back to speechSynthesis when this fails)
 POST /api/translate  -> NDJSON stream: ({"status": str} | {"delta": str})* then
                         {"done": true, "text": str, "ms": int} or {"error": str}
+                        The body may carry "session" (made by the browser per page load); every
+                        finished translation is appended to the SQLite file given by --db.
 """
 from __future__ import annotations
 
@@ -35,11 +37,14 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import storage
 import translator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(HERE, "index.html")
 CERT_DIR = os.path.join(HERE, "certs")
+DEFAULT_DB = os.path.join(HERE, "conversations.db")
+UNKNOWN_SESSION = "unknown"
 MAX_TEXT_CHARS = 2000
 MAX_CONCURRENT = 2
 
@@ -151,6 +156,7 @@ def synthesize(text: str, lang: str) -> bytes:
 
 class Handler(BaseHTTPRequestHandler):
     backend = None  # set by main()
+    store: storage.ConversationStore | None = None  # conversation log; None = do not save
     gate = threading.BoundedSemaphore(MAX_CONCURRENT)
 
     def log_message(self, fmt, *args):  # quieter than the default
@@ -209,6 +215,15 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json(404, {"error": "not found"})
 
+    def _save_turn(self, session_id: str, source: str, target: str, text: str, translated: str) -> None:
+        """Append to the conversation log; a storage problem must never fail the translation."""
+        if self.store is None:
+            return
+        try:
+            self.store.save_turn(session_id, source, target, text, translated)
+        except Exception as e:  # noqa: BLE001 - log and keep serving
+            self.log_message("could not save conversation: %s: %s", type(e).__name__, e)
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path != "/api/translate":
@@ -223,6 +238,8 @@ class Handler(BaseHTTPRequestHandler):
         text = (body.get("text") or "").strip()
         source = body.get("source") or "ko"
         target = body.get("target") or "tl"
+        session = body.get("session")
+        session_id = session if storage.is_valid_session_id(session) else UNKNOWN_SESSION
         if not text:
             return self._json(400, {"error": "text is required"})
         if len(text) > MAX_TEXT_CHARS:
@@ -250,6 +267,7 @@ class Handler(BaseHTTPRequestHandler):
                         ms = int((time.monotonic() - started) * 1000)
                         self._write_line({"done": True, "text": payload, "ms": ms})
                         self.log_message("translated %s->%s in %dms (%d chars)", source, target, ms, len(text))
+                        self._save_turn(session_id, source, target, text, payload)
                     else:
                         self._write_line({"error": payload})
                         self.log_message("translate error: %s", payload)
@@ -316,12 +334,16 @@ def main(argv=None) -> int:
                     help="open a Cloudflare quick tunnel and print a public https URL (needs `brew install cloudflared`)")
     ap.add_argument("--key", default=os.environ.get("VT_ACCESS_KEY"),
                     help="access key required for /api/* (auto-generated with --public)")
+    ap.add_argument("--db", default=DEFAULT_DB,
+                    help="SQLite file that keeps every translated sentence (default: conversations.db next to server.py)")
+    ap.add_argument("--no-db", action="store_true", help="do not save conversations")
     args = ap.parse_args(argv)
 
     global ACCESS_KEY
     ACCESS_KEY = args.key or (generate_key() if args.public else None)
 
     Handler.backend = translator.get_backend(args.backend)
+    Handler.store = None if args.no_db else storage.ConversationStore(args.db)
     ready, detail = Handler.backend.ready()
     if ready and hasattr(Handler.backend, "warm"):
         # Start the interpreter session now so the first sentence does not pay the CLI start-up.
@@ -349,6 +371,8 @@ def main(argv=None) -> int:
     else:
         print(f"voice translator  http://{host}:{args.port}/", flush=True)
     print(f"backend: {Handler.backend.name}  ready: {ready}  ({detail})", flush=True)
+    if Handler.store is not None:
+        print(f"conversations saved to: {Handler.store.path}", flush=True)
     if not ready:
         print("NOTE: backend not ready; requests will return an error until it is.", flush=True)
     tunnel = None
@@ -372,6 +396,8 @@ def main(argv=None) -> int:
             tunnel.terminate()
         if hasattr(Handler.backend, "close"):
             Handler.backend.close()
+        if Handler.store is not None:
+            Handler.store.close()
         httpd.server_close()
     return 0
 

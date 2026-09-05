@@ -48,6 +48,8 @@ Cloudflare 임시 터널이 열리고 이런 줄이 출력됩니다. 이 주소�
 | `--public` | 꺼짐 | Cloudflare 임시 터널로 공개 https 주소 발급 (`cloudflared` 필요), 접속 키 자동 생성 |
 | `--key` | 없음 (`VT_ACCESS_KEY`) | `/api/*` 접속 키를 직접 지정. `--public` 없이도 쓸 수 있음 |
 | `--port` | `8787` | 포트 |
+| `--db` | `conversations.db` | 대화 내용을 저장할 SQLite 파일 |
+| `--no-db` | 꺼짐 | 대화 내용을 저장하지 않음 |
 
 환경변수: `AGY_MODEL`(기본 `gemini-3.7-flash-low`, `agy models` 로 목록 확인), `OLLAMA_URL`, `OLLAMA_MODEL`, `META_API_KEY`.
 
@@ -74,6 +76,24 @@ muse는 이를 최대 10회 지수 백오프로 재시도하므로, 이 앱은 4
 결제 설정: https://accountscenter.meta.com/muse_code/?ep=no_payg (터미널 `muse` 실행 시 Ctrl+Enter 로 여는 것과 같은 페이지).
 결제 전에 앱을 써 보려면 `--backend ollama` 를 쓰세요.
 
+## 대화 내용 저장
+
+번역이 끝난 문장은 서버 옆의 `conversations.db`(SQLite)에 텍스트만 쌓입니다. 페이지를 새로 열 때마다 새 세션이 됩니다.
+화면에는 지난 대화를 보는 기능이 없고, 필요할 때 파일을 직접 열어 봅니다.
+
+```bash
+# 세션 목록
+sqlite3 conversations.db 'SELECT id, started_at FROM sessions ORDER BY started_at'
+# 한 세션의 대화 (시간순)
+sqlite3 -header -column conversations.db "SELECT created_at, source, target, source_text, translated_text FROM turns WHERE session_id = '<세션 id>' ORDER BY id"
+# 전체를 CSV 로
+sqlite3 -header -csv conversations.db 'SELECT * FROM turns ORDER BY id' > conversations.csv
+```
+
+- `sessions(id, started_at)` — 세션. `id` 는 브라우저가 페이지를 열 때 만든 값이고, 세션 없이 온 요청은 `unknown` 으로 묶입니다.
+- `turns(id, session_id, created_at, source, target, source_text, translated_text)` — 문장 하나가 한 행. 실패한 번역은 저장하지 않습니다.
+- 지우려면 파일을 삭제하면 됩니다. 저장을 끄려면 `--no-db` 로 켭니다.
+
 ## 테스트
 
 ```bash
@@ -84,5 +104,6 @@ python3 -m unittest discover -p 'test_*.py'
 
 - `server.py` — HTTP 서버. `GET /api/health`, `POST /api/translate` (NDJSON 스트림), `GET /api/tts` (mp3).
 - `translator.py` — 프롬프트 구성, agy / muse / ollama 백엔드 (muse JSONL 파싱 포함).
+- `storage.py` — 대화 내용 SQLite 저장 (`conversations.db`).
 - `index.html` — 단일 페이지 UI.
 - `fixtures/echo_run.jsonl` — `muse exec --json --provider echo` 실제 출력 (파서 테스트 픽스처).
